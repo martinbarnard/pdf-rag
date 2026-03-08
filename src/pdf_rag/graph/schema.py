@@ -27,6 +27,7 @@ _NODE_TABLES: list[str] = [
         arxiv_id    STRING,
         file_path   STRING,
         summary     STRING,
+        status      STRING,
         PRIMARY KEY (id)
     )
     """,
@@ -136,6 +137,7 @@ def create_schema(conn: kuzu.Connection) -> None:
 def _migrate(conn: kuzu.Connection) -> None:
     """Apply additive migrations to existing databases."""
     _add_column_if_missing(conn, "Paper", "arxiv_id", 'STRING DEFAULT ""')
+    _add_column_if_missing(conn, "Paper", "status", 'STRING DEFAULT "ingested"')
 
 
 def _add_column_if_missing(

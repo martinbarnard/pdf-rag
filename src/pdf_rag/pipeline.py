@@ -163,6 +163,7 @@ def store_prepared(prepared: PreparedDocument, store: GraphStore) -> IngestResul
         arxiv_id=prepared.arxiv_id,
         file_path=str(prepared.file_path),
         summary=prepared.summary,
+        status="ingested",
     )
 
     for author in prepared.authors:

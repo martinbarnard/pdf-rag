@@ -20,7 +20,7 @@ const NODE_COLOURS: Record<string, string> = {
   GhostTopic:  '#fbbf24',
 }
 
-interface CyNode { data: { id: string; label: string; type: string } }
+interface CyNode { data: { id: string; label: string; type: string; status?: string } }
 interface CyEdge { data: { id: string; source: string; target: string; label: string } }
 interface OverviewData { nodes: CyNode[]; edges: CyEdge[] }
 
@@ -239,7 +239,13 @@ export default function GraphExplorer() {
         overviewRef.current = data
         expandedRef.current = new Set()
 
-        const paperNodes = data.nodes.filter(n => n.data.type === 'Paper')
+        // Stub papers from the DB are rendered as GhostPaper nodes on load
+        const paperNodes = data.nodes
+          .filter(n => n.data.type === 'Paper')
+          .map(n => n.data.status === 'stub'
+            ? { ...n, data: { ...n.data, type: 'GhostPaper' } }
+            : n
+          )
         const cy = cytoscape({
           container: containerRef.current!,
           elements: paperNodes,
@@ -256,9 +262,31 @@ export default function GraphExplorer() {
           setSelected({ id, type, label })
 
           if (type === 'GhostPaper') {
-            // Look up the stored result by node ID (keyed as ghostPaperId(arxiv_id))
-            const detail = ghostResultsRef.current.get(id) ?? null
-            setGhostDetail(detail)
+            const cached = ghostResultsRef.current.get(id) ?? null
+            if (cached) {
+              setGhostDetail(cached)
+            } else {
+              // DB-origin stub: fetch detail lazily from the API
+              setGhostDetail(null)
+              fetch(`/api/papers/${encodeURIComponent(id)}`)
+                .then(r => r.ok ? r.json() : null)
+                .then((paper: any) => {
+                  if (!paper) return
+                  const synthetic: ArxivResult = {
+                    arxiv_id: paper.arxiv_id || '',
+                    title: paper.title || '',
+                    authors: (paper.authors || []).map((a: any) => a.canonical_name || a.name || ''),
+                    abstract: paper.abstract || '',
+                    published: paper.year ? `${paper.year}-01-01` : '',
+                    categories: (paper.topics || []).map((t: any) => t.canonical_name || t.name || ''),
+                    pdf_url: paper.arxiv_id ? `https://arxiv.org/pdf/${paper.arxiv_id}` : (paper.file_path || ''),
+                    similarity_score: 0,
+                  }
+                  ghostResultsRef.current.set(id, synthetic)
+                  setGhostDetail(synthetic)
+                })
+                .catch(() => {/* leave panel showing "Detail unavailable" */})
+            }
             return
           }
           setGhostDetail(null)

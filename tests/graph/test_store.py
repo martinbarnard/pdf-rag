@@ -149,3 +149,61 @@ class TestEdgeWriters:
             "MATCH (a:Author {id: 'a1'})-[:AUTHORED]->(p:Paper {id: 'p1'}) RETURN count(*)"
         )
         assert result.get_next()[0] >= 1
+
+
+class TestStubPaper:
+    def test_upsert_stub_creates_paper_node(self, tmp_db: GraphStore) -> None:
+        pid = tmp_db.upsert_stub_paper(
+            arxiv_id="2301.04567", title="Attention Is All You Need",
+            abstract="We propose...", year=2017,
+            pdf_url="https://arxiv.org/pdf/2301.04567",
+        )
+        assert pid == "arxiv:2301.04567"
+        r = tmp_db.execute("MATCH (p:Paper {id: 'arxiv:2301.04567'}) RETURN p.status, p.title")
+        row = r.get_next()
+        assert row[0] == "stub"
+        assert row[1] == "Attention Is All You Need"
+
+    def test_upsert_stub_creates_authors_and_edges(self, tmp_db: GraphStore) -> None:
+        tmp_db.upsert_stub_paper(
+            arxiv_id="2301.11111", title="T", authors=["Alice Smith", "Bob Jones"],
+        )
+        r = tmp_db.execute(
+            "MATCH (a:Author)-[:AUTHORED]->(p:Paper {id: 'arxiv:2301.11111'}) RETURN count(a)"
+        )
+        assert r.get_next()[0] == 2
+
+    def test_upsert_stub_creates_topics_and_edges(self, tmp_db: GraphStore) -> None:
+        tmp_db.upsert_stub_paper(
+            arxiv_id="2301.22222", title="T", categories=["cs.CL", "cs.AI"],
+        )
+        r = tmp_db.execute(
+            "MATCH (p:Paper {id: 'arxiv:2301.22222'})-[:DISCUSSES]->(t:Topic) RETURN count(t)"
+        )
+        assert r.get_next()[0] == 2
+
+    def test_upsert_stub_does_not_overwrite_ingested(self, tmp_db: GraphStore) -> None:
+        # Pre-existing ingested paper with the same id
+        tmp_db.add_paper(id="arxiv:2301.33333", title="Real Title", status="ingested")
+        tmp_db.upsert_stub_paper(arxiv_id="2301.33333", title="Stub Title")
+        r = tmp_db.execute("MATCH (p:Paper {id: 'arxiv:2301.33333'}) RETURN p.status, p.title")
+        row = r.get_next()
+        assert row[0] == "ingested"   # not overwritten
+        assert row[1] == "Real Title"  # not overwritten
+
+    def test_upsert_stub_idempotent(self, tmp_db: GraphStore) -> None:
+        for _ in range(3):
+            tmp_db.upsert_stub_paper(arxiv_id="2301.44444", title="Dupe")
+        r = tmp_db.execute("MATCH (p:Paper {id: 'arxiv:2301.44444'}) RETURN count(p)")
+        assert r.get_next()[0] == 1
+
+    def test_update_paper_status(self, tmp_db: GraphStore) -> None:
+        tmp_db.add_paper(id="stub1", title="Stub", status="stub")
+        tmp_db.update_paper_status("stub1", "ingested")
+        r = tmp_db.execute("MATCH (p:Paper {id: 'stub1'}) RETURN p.status")
+        assert r.get_next()[0] == "ingested"
+
+    def test_add_paper_status_defaults_ingested(self, tmp_db: GraphStore) -> None:
+        tmp_db.add_paper(id="default_status", title="T")
+        r = tmp_db.execute("MATCH (p:Paper {id: 'default_status'}) RETURN p.status")
+        assert r.get_next()[0] == "ingested"

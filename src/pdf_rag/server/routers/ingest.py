@@ -90,6 +90,15 @@ class IngestManager:
             daemon=True,
         ).start()
 
+    def submit_stubs(self, stubs: list[dict]) -> None:
+        """Queue a batch of arXiv stub dicts for background persistence.
+
+        Each dict must have keys: arxiv_id, title, abstract, year, pdf_url,
+        authors (list[str]), categories (list[str]).
+        Routes through the serial DB-writer thread so no concurrent write risk.
+        """
+        self._store_queue.put(("__stubs__", stubs))
+
     def register(self, job: IngestJob) -> None:
         with self._lock:
             self._jobs[job.id] = job
@@ -140,20 +149,36 @@ class IngestManager:
         store: GraphStore | None = None
 
         while True:
-            job_id, prepared = self._store_queue.get()
+            item = self._store_queue.get()
             try:
                 if store is None:
                     store = GraphStore(self._db_path)
-                result = store_prepared(prepared, store)
-                self._set_status(
-                    job_id, "done",
-                    paper_id=result.paper_id,
-                    chunk_count=result.chunk_count,
-                    entity_count=result.entity_count,
-                    citation_count=result.citation_count,
-                )
+
+                if item[0] == "__stubs__":
+                    # Batch stub persistence from arXiv search
+                    for stub in item[1]:
+                        store.upsert_stub_paper(
+                            arxiv_id=stub["arxiv_id"],
+                            title=stub["title"],
+                            abstract=stub["abstract"],
+                            year=stub["year"],
+                            pdf_url=stub["pdf_url"],
+                            authors=stub["authors"],
+                            categories=stub["categories"],
+                        )
+                else:
+                    job_id, prepared = item
+                    result = store_prepared(prepared, store)
+                    self._set_status(
+                        job_id, "done",
+                        paper_id=result.paper_id,
+                        chunk_count=result.chunk_count,
+                        entity_count=result.entity_count,
+                        citation_count=result.citation_count,
+                    )
             except Exception as exc:
-                self._set_status(job_id, "error", error=str(exc))
+                if item[0] != "__stubs__":
+                    self._set_status(item[0], "error", error=str(exc))
                 # Drop the store so next job gets a fresh connection
                 store = None
             finally:

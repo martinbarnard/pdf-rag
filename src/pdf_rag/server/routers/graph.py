@@ -83,7 +83,7 @@ async def paper_detail(paper_id: str, request: Request) -> dict:
     store = _store(request)
 
     r = store.execute(
-        "MATCH (p:Paper {id: $id}) RETURN p.id, p.title, p.abstract, p.year, p.doi, p.file_path, p.summary",
+        "MATCH (p:Paper {id: $id}) RETURN p.id, p.title, p.abstract, p.year, p.doi, p.file_path, p.summary, p.status, p.arxiv_id",
         {"id": paper_id},
     )
     if not r.has_next():
@@ -92,6 +92,7 @@ async def paper_detail(paper_id: str, request: Request) -> dict:
     paper = {
         "id": row[0], "title": row[1], "abstract": row[2],
         "year": row[3], "doi": row[4], "file_path": row[5], "summary": row[6] or "",
+        "status": row[7] or "ingested", "arxiv_id": row[8] or "",
     }
 
     ar = store.execute(
@@ -208,12 +209,13 @@ async def graph_overview(request: Request) -> dict:
     nodes: list[dict] = []
     edges: list[dict] = []
 
-    r = store.execute("MATCH (p:Paper) RETURN p.id, p.title, p.year, p.doi")
+    r = store.execute("MATCH (p:Paper) RETURN p.id, p.title, p.year, p.doi, p.status")
     while r.has_next():
         row = r.get_next()
         nodes.append({"data": {
             "id": row[0], "label": row[1] or row[0],
             "type": "Paper", "year": row[2], "doi": row[3] or "",
+            "status": row[4] or "ingested",
         }})
 
     r = store.execute("MATCH (a:Author) RETURN a.id, a.canonical_name")

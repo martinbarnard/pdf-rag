@@ -19,11 +19,11 @@ class ArxivIngestRequest(BaseModel):
 
 
 @router.post("/arxiv/search")
-async def arxiv_search(body: ArxivSearchRequest) -> dict:
+async def arxiv_search(body: ArxivSearchRequest, request: Request) -> dict:
     """Search arXiv by keyword terms and/or author name.
 
     Returns a list of ArxivResult dicts plus an attribution string.
-    Does not require a paper to exist in the graph.
+    Auto-persists results as stub Paper nodes in the graph (fire-and-forget).
     """
     from pdf_rag.arxiv import ArxivClient
 
@@ -37,6 +37,24 @@ async def arxiv_search(body: ArxivSearchRequest) -> dict:
     top_k = min(body.top_k, 25)
     client = ArxivClient()
     results = client.search(terms=terms, max_results=top_k)
+
+    # Persist as stubs via the serial DB-writer thread (no concurrency risk)
+    if results:
+        from pdf_rag.server.routers.ingest import _get_manager
+        db_path = request.app.state.db_path
+        stubs = [
+            {
+                "arxiv_id": r.arxiv_id,
+                "title": r.title,
+                "abstract": r.abstract,
+                "year": int(r.published[:4]) if r.published else 0,
+                "pdf_url": r.pdf_url,
+                "authors": r.authors,
+                "categories": r.categories,
+            }
+            for r in results
+        ]
+        _get_manager(db_path).submit_stubs(stubs)
 
     return {
         "results": [r.to_dict() for r in results],

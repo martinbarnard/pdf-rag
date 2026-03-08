@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from pathlib import Path
 from typing import Any
+
+
+def _slug(name: str) -> str:
+    """Deterministic 12-char node ID from a name string (matches pipeline._slug)."""
+    return hashlib.sha1(name.lower().strip().encode()).hexdigest()[:12]
 
 import kuzu
 
@@ -83,6 +89,7 @@ class GraphStore:
         arxiv_id: str = "",
         file_path: str = "",
         summary: str = "",
+        status: str = "ingested",
     ) -> None:
         """Upsert a Paper node."""
         self._conn.execute(
@@ -91,11 +98,59 @@ class GraphStore:
             ON CREATE SET p.title = $title, p.abstract = $abstract,
                           p.year = $year, p.doi = $doi,
                           p.arxiv_id = $arxiv_id,
-                          p.file_path = $file_path, p.summary = $summary
+                          p.file_path = $file_path, p.summary = $summary,
+                          p.status = $status
             """,
             {"id": id, "title": title, "abstract": abstract,
              "year": year, "doi": doi, "arxiv_id": arxiv_id,
-             "file_path": file_path, "summary": summary},
+             "file_path": file_path, "summary": summary, "status": status},
+        )
+
+    def upsert_stub_paper(
+        self,
+        arxiv_id: str,
+        title: str,
+        abstract: str = "",
+        year: int = 0,
+        pdf_url: str = "",
+        authors: list[str] | None = None,
+        categories: list[str] | None = None,
+    ) -> str:
+        """Write a lightweight stub Paper node from arXiv metadata.
+
+        Uses MERGE ON CREATE so an already-ingested paper is never demoted to stub.
+        Also writes Author nodes + AUTHORED edges and Topic nodes + DISCUSSES edges.
+
+        Returns the paper_id used (``arxiv:<arxiv_id>``).
+        """
+        paper_id = f"arxiv:{arxiv_id}"
+        self._conn.execute(
+            """
+            MERGE (p:Paper {id: $id})
+            ON CREATE SET p.title = $title, p.abstract = $abstract,
+                          p.year = $year, p.doi = '',
+                          p.arxiv_id = $arxiv_id,
+                          p.file_path = $pdf_url, p.summary = '',
+                          p.status = 'stub'
+            """,
+            {"id": paper_id, "title": title, "abstract": abstract,
+             "year": year, "arxiv_id": arxiv_id, "pdf_url": pdf_url},
+        )
+        for name in (authors or []):
+            author_id = _slug(name)
+            self.add_author(id=author_id, name=name, canonical_name=name)
+            self.link_author_paper(author_id, paper_id)
+        for cat in (categories or []):
+            topic_id = _slug(cat)
+            self.add_topic(id=topic_id, name=cat, canonical_name=cat)
+            self.link_paper_topic(paper_id, topic_id)
+        return paper_id
+
+    def update_paper_status(self, paper_id: str, status: str) -> None:
+        """Set the status field on an existing Paper node."""
+        self._conn.execute(
+            "MATCH (p:Paper {id: $id}) SET p.status = $status",
+            {"id": paper_id, "status": status},
         )
 
     def add_author(
