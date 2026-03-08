@@ -183,6 +183,44 @@ class GraphStore:
         )
 
     # ------------------------------------------------------------------
+    # Vector search
+    # ------------------------------------------------------------------
+
+    def search_similar_chunks(
+        self,
+        query_embedding: list[float],
+        top_k: int = 5,
+    ) -> list[dict]:
+        """Find the top-k most similar Chunks by cosine similarity.
+
+        Only Chunks that have a non-null embedding are considered.
+
+        Args:
+            query_embedding: Query vector (must match EMBEDDING_DIM).
+            top_k: Number of results to return.
+
+        Returns:
+            List of dicts with keys: id, text, section, score.
+            Ordered by descending similarity score.
+        """
+        result = self._conn.execute(
+            """
+            MATCH (c:Chunk)
+            WHERE c.embedding IS NOT NULL
+            WITH c, array_cosine_similarity(c.embedding, $q) AS score
+            ORDER BY score DESC
+            LIMIT $k
+            RETURN c.id, c.text, c.section, score
+            """,
+            {"q": query_embedding, "k": top_k},
+        )
+        rows = []
+        while result.has_next():
+            row = result.get_next()
+            rows.append({"id": row[0], "text": row[1], "section": row[2], "score": float(row[3])})
+        return rows
+
+    # ------------------------------------------------------------------
     # Query helpers
     # ------------------------------------------------------------------
 

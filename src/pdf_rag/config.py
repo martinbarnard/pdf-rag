@@ -19,3 +19,7 @@ SIMILARITY_THRESHOLD: float = 0.85
 # Chunking
 CHUNK_SIZE: int = 512
 CHUNK_OVERLAP: int = 64
+
+# Embedding dimension — must match the chosen model output size.
+# all-MiniLM-L6-v2: 384, Qwen3-Embedding-0.6B: 1024
+EMBEDDING_DIM: int = 1024

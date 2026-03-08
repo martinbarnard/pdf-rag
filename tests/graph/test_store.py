@@ -87,12 +87,13 @@ class TestAddChunk:
         assert row[1] == "Introduction"
 
     def test_add_chunk_with_embedding(self, tmp_db: GraphStore) -> None:
-        embedding = [0.1, 0.2, 0.3, 0.4]
+        from pdf_rag.config import EMBEDDING_DIM
+        embedding = [0.1] * EMBEDDING_DIM
         tmp_db.add_chunk(id="c2", text="Embedded chunk.", section="Methods", embedding=embedding)
         result = tmp_db.execute("MATCH (c:Chunk {id: 'c2'}) RETURN c.embedding")
         row = result.get_next()
         assert row[0] is not None
-        assert len(row[0]) == 4
+        assert len(row[0]) == EMBEDDING_DIM
 
     def test_add_chunk_idempotent(self, tmp_db: GraphStore) -> None:
         for _ in range(2):

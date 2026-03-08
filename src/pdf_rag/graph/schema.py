@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import kuzu
 
+from pdf_rag.config import EMBEDDING_DIM
+
 
 # ---------------------------------------------------------------------------
 # Node table DDL
@@ -63,13 +65,13 @@ _NODE_TABLES: list[str] = [
         PRIMARY KEY (id)
     )
     """,
-    """
+    f"""
     CREATE NODE TABLE IF NOT EXISTS Chunk (
         id        STRING,
         text      STRING,
         page      INT64,
         section   STRING,
-        embedding FLOAT[],
+        embedding FLOAT[{EMBEDDING_DIM}],
         PRIMARY KEY (id)
     )
     """,
