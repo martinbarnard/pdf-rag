@@ -212,7 +212,21 @@ Re-ingest all documents (e.g. after database corruption or a fresh start). The s
 uv run pdf-rag ingest ~/.pdf_rag/documents/
 ```
 
-Models are loaded once and reused across all files.
+Models are loaded once and reused across all files. By default files are processed in 50 MB batches to limit peak memory usage. Adjust with:
+
+```bash
+# Larger batches (more RAM)
+uv run pdf-rag ingest ~/.pdf_rag/documents/ --batch-mb 100
+
+# Smaller batches (less RAM)
+uv run pdf-rag ingest ~/.pdf_rag/documents/ --batch-mb 20
+
+# Fixed file count per batch instead
+uv run pdf-rag ingest ~/.pdf_rag/documents/ --batch-size 3
+
+# No batching (original behaviour)
+uv run pdf-rag ingest ~/.pdf_rag/documents/ --batch-mb 0
+```
 
 ### Fix paper titles
 

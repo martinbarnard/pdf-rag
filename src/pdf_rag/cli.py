@@ -22,8 +22,17 @@ console = Console()
 def ingest(
     path: Path = typer.Argument(..., help="Path to a document file or directory."),
     db: Path = typer.Option(None, "--db", help="Path to the kuzu database directory."),
+    batch_size: int = typer.Option(0, "--batch-size", help="Max files per batch (0 = no limit)."),
+    batch_mb: float = typer.Option(50.0, "--batch-mb", help="Max total MB per batch (0 = no limit)."),
 ) -> None:
-    """Ingest one or more documents into the graph database."""
+    """Ingest one or more documents into the graph database.
+
+    Large collections are processed in batches to bound peak memory usage.
+    Between batches, parsed document objects are released and garbage-collected.
+    Models (embedder, entity extractor) are loaded once and reused across all batches.
+    """
+    import gc
+
     from pdf_rag.config import DEFAULT_DB_PATH, DEFAULT_INGEST_DIR
     from pdf_rag.extraction.entities import EntityExtractor
     from pdf_rag.ingestion.embedder import Embedder
@@ -46,45 +55,94 @@ def ingest(
 
     console.print(f"[dim]Documents folder:[/dim] [cyan]{ingest_dir}[/cyan]")
 
-    # Load models once, reuse across files
+    # Load models once, reuse across all batches
     with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
         t = progress.add_task("Loading models...", total=None)
         embedder = Embedder()
         extractor = EntityExtractor()
         progress.remove_task(t)
 
-    total = len(files)
-    success = 0
-    for i, file in enumerate(files, 1):
-        # Copy to ingest_dir unless already inside it
-        try:
-            file.resolve().relative_to(ingest_dir.resolve())
-            ingest_path = file  # already inside ingest_dir
-        except ValueError:
-            dest = ingest_dir / file.name
-            if dest.exists() and dest.resolve() != file.resolve():
-                # avoid overwriting — suffix with counter
-                stem, suffix = file.stem, file.suffix
-                counter = 1
-                while dest.exists():
-                    dest = ingest_dir / f"{stem}_{counter}{suffix}"
-                    counter += 1
-            if not dest.exists():
-                shutil.copy2(file, dest)
-                console.print(f"  [dim]→ copied to {dest}[/dim]")
-            ingest_path = dest
+    # Build batches respecting --batch-size and --batch-mb limits
+    batches: list[list[Path]] = []
+    current_batch: list[Path] = []
+    current_mb = 0.0
+    batch_mb_limit = batch_mb * 1024 * 1024  # convert to bytes (0 = disabled)
 
-        console.print(f"[dim]({i}/{total})[/dim] Ingesting [bold]{file.name}[/bold]...")
-        try:
-            result = ingest_document(ingest_path, db_path=db_path, embedder=embedder, extractor=extractor)
+    for file in files:
+        file_bytes = file.stat().st_size
+        file_mb_str = f"{file_bytes / 1_048_576:.1f} MB"
+
+        # Flush current batch if either limit would be exceeded
+        would_exceed_count = batch_size > 0 and len(current_batch) >= batch_size
+        would_exceed_mb = batch_mb_limit > 0 and current_mb + file_bytes > batch_mb_limit
+
+        if current_batch and (would_exceed_count or would_exceed_mb):
+            batches.append(current_batch)
+            current_batch = []
+            current_mb = 0.0
+
+        current_batch.append(file)
+        current_mb += file_bytes
+
+    if current_batch:
+        batches.append(current_batch)
+
+    total = len(files)
+    num_batches = len(batches)
+    success = 0
+    file_index = 0
+
+    batch_label = (
+        f"batch-size={batch_size}" if batch_size and not batch_mb else
+        f"batch-mb={batch_mb}" if batch_mb and not batch_size else
+        f"batch-size={batch_size}, batch-mb={batch_mb}" if batch_size and batch_mb else
+        "no batching"
+    )
+    if num_batches > 1:
+        console.print(f"[dim]Processing {total} files in {num_batches} batches ({batch_label})[/dim]")
+
+    for batch_num, batch in enumerate(batches, 1):
+        if num_batches > 1:
+            batch_bytes = sum(f.stat().st_size for f in batch)
             console.print(
-                f"  [green]✓[/green] {result.chunk_count} chunks, "
-                f"{result.entity_count} entities, "
-                f"{result.citation_count} citations"
+                f"\n[bold]Batch {batch_num}/{num_batches}[/bold] "
+                f"[dim]({len(batch)} files, {batch_bytes / 1_048_576:.1f} MB)[/dim]"
             )
-            success += 1
-        except (FileNotFoundError, ValueError) as e:
-            console.print(f"  [red]✗[/red] {e}")
+
+        for file in batch:
+            file_index += 1
+            # Copy to ingest_dir unless already inside it
+            try:
+                file.resolve().relative_to(ingest_dir.resolve())
+                ingest_path = file
+            except ValueError:
+                dest = ingest_dir / file.name
+                if dest.exists() and dest.resolve() != file.resolve():
+                    stem, suffix = file.stem, file.suffix
+                    counter = 1
+                    while dest.exists():
+                        dest = ingest_dir / f"{stem}_{counter}{suffix}"
+                        counter += 1
+                if not dest.exists():
+                    shutil.copy2(file, dest)
+                    console.print(f"  [dim]→ copied to {dest}[/dim]")
+                ingest_path = dest
+
+            console.print(f"[dim]({file_index}/{total})[/dim] Ingesting [bold]{file.name}[/bold]...")
+            try:
+                result = ingest_document(ingest_path, db_path=db_path, embedder=embedder, extractor=extractor)
+                console.print(
+                    f"  [green]✓[/green] {result.chunk_count} chunks, "
+                    f"{result.entity_count} entities, "
+                    f"{result.citation_count} citations"
+                )
+                success += 1
+            except (FileNotFoundError, ValueError) as e:
+                console.print(f"  [red]✗[/red] {e}")
+
+        # Release parsed document memory between batches
+        if num_batches > 1:
+            gc.collect()
 
     console.print(f"\n[bold]Done:[/bold] {success}/{total} files ingested into [cyan]{db_path}[/cyan]")
 
