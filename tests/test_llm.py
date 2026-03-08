@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pdf_rag.llm import call_llm
+from pdf_rag.llm import call_llm, list_local_models, probe_local
 
 
 CONTEXT = "Transformers use self-attention. Vaswani et al., 2017."
@@ -72,6 +72,28 @@ class TestCallLlmDefaultBackend:
         with pytest.raises(ValueError, match="Unknown LLM backend"):
             call_llm(CONTEXT, QUERY, backend="unknown_backend")
 
+    def test_auto_uses_local_when_probe_succeeds(self) -> None:
+        with patch("pdf_rag.llm.probe_local", return_value=True):
+            with patch("pdf_rag.llm._call_local", return_value="local") as mock:
+                result = call_llm(CONTEXT, QUERY, backend="auto")
+        mock.assert_called_once_with(CONTEXT, QUERY)
+        assert result == "local"
+
+    def test_auto_falls_back_to_anthropic_when_probe_fails(self) -> None:
+        with patch("pdf_rag.llm.probe_local", return_value=False):
+            with patch("pdf_rag.llm._call_anthropic", return_value="claude") as mock:
+                result = call_llm(CONTEXT, QUERY, backend="auto")
+        mock.assert_called_once_with(CONTEXT, QUERY)
+        assert result == "claude"
+
+    def test_auto_falls_back_when_local_raises(self) -> None:
+        with patch("pdf_rag.llm.probe_local", return_value=True):
+            with patch("pdf_rag.llm._call_local", side_effect=Exception("conn refused")):
+                with patch("pdf_rag.llm._call_anthropic", return_value="fallback") as mock:
+                    result = call_llm(CONTEXT, QUERY, backend="auto")
+        mock.assert_called_once()
+        assert result == "fallback"
+
 
 class TestCallLocal:
     """Unit tests for _call_local using a mocked httpx response."""
@@ -131,6 +153,63 @@ class TestCallLocal:
 
         payload = mock_post.call_args[1]["json"]
         assert payload["model"] == "my-model"
+
+class TestProbeLocal:
+    def test_returns_true_when_models_endpoint_responds(self) -> None:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"data": [{"id": "qwen3.5-9b"}]}
+        with patch("pdf_rag.llm.LOCAL_LLM_BASE_URL", "http://localhost:1234"):
+            with patch("httpx.get", return_value=mock_resp):
+                assert probe_local() is True
+
+    def test_returns_false_on_connection_error(self) -> None:
+        import httpx
+        with patch("pdf_rag.llm.LOCAL_LLM_BASE_URL", "http://localhost:1234"):
+            with patch("httpx.get", side_effect=httpx.ConnectError("refused")):
+                assert probe_local() is False
+
+    def test_returns_false_on_timeout(self) -> None:
+        import httpx
+        with patch("pdf_rag.llm.LOCAL_LLM_BASE_URL", "http://localhost:1234"):
+            with patch("httpx.get", side_effect=httpx.TimeoutException("timeout")):
+                assert probe_local() is False
+
+    def test_returns_false_on_http_error(self) -> None:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = Exception("500")
+        with patch("pdf_rag.llm.LOCAL_LLM_BASE_URL", "http://localhost:1234"):
+            with patch("httpx.get", return_value=mock_resp):
+                assert probe_local() is False
+
+
+class TestListLocalModels:
+    def test_returns_list_of_model_ids(self) -> None:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "data": [{"id": "qwen3.5-9b"}, {"id": "mistral-7b"}]
+        }
+        with patch("pdf_rag.llm.LOCAL_LLM_BASE_URL", "http://localhost:1234"):
+            with patch("httpx.get", return_value=mock_resp):
+                models = list_local_models()
+        assert models == ["qwen3.5-9b", "mistral-7b"]
+
+    def test_returns_empty_list_when_server_unreachable(self) -> None:
+        import httpx
+        with patch("pdf_rag.llm.LOCAL_LLM_BASE_URL", "http://localhost:1234"):
+            with patch("httpx.get", side_effect=httpx.ConnectError("refused")):
+                assert list_local_models() == []
+
+    def test_hits_correct_endpoint(self) -> None:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"data": []}
+        with patch("pdf_rag.llm.LOCAL_LLM_BASE_URL", "http://localhost:1234"):
+            with patch("httpx.get", return_value=mock_resp) as mock_get:
+                list_local_models()
+        assert mock_get.call_args[0][0] == "http://localhost:1234/v1/models"
+
 
     def test_call_local_empty_context(self) -> None:
         from pdf_rag.llm import _call_local

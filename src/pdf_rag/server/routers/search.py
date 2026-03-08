@@ -8,12 +8,27 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-router = APIRouter(tags=["search"])
+router = APIRouter(tags=["search", "llm"])
 
 
 class SearchRequest(BaseModel):
     query: str
     top_k: int = 5
+
+
+@router.get("/models")
+async def get_models() -> dict:
+    """Return available local LLM models and active backend configuration."""
+    from pdf_rag.llm import LLM_BACKEND, LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL, list_local_models, probe_local
+
+    reachable = probe_local()
+    return {
+        "backend": LLM_BACKEND,
+        "local_base_url": LOCAL_LLM_BASE_URL,
+        "configured_model": LOCAL_LLM_MODEL,
+        "local_reachable": reachable,
+        "available_models": list_local_models() if reachable else [],
+    }
 
 
 @router.post("/search")

@@ -24,10 +24,14 @@ CHUNK_OVERLAP: int = 64
 # all-MiniLM-L6-v2: 384, Qwen3-Embedding-0.6B: 1024
 EMBEDDING_DIM: int = 1024
 
-# LLM backend — "anthropic" (default) or "local" (Ollama / LM Studio / any OpenAI-compatible server)
-LLM_BACKEND: str = "anthropic"          # override with LLM_BACKEND env var (not auto-read here; set in llm.py)
-LOCAL_LLM_BASE_URL: str = "http://localhost:1234"   # LM Studio default
-LOCAL_LLM_MODEL: str = "qwen2.5-7b-instruct"        # model tag as shown in LM Studio
+# LLM backend selection:
+#   "anthropic" — always use Anthropic Claude (requires ANTHROPIC_API_KEY)
+#   "local"     — always use local OpenAI-compatible server (LM Studio / Ollama)
+#   "auto"      — probe local server first; fall back to Anthropic if unreachable
+LLM_BACKEND: str = "auto"
+LOCAL_LLM_BASE_URL: str = "http://localhost:1234"    # LM Studio default port
+LOCAL_LLM_MODEL: str = "qwen/qwen3.5-9b"             # model tag as loaded in LM Studio
+LOCAL_LLM_PROBE_TIMEOUT: float = 3.0                 # seconds to wait when probing local server
 
 # Device placement for ML models.
 # GLiNER defaults to CPU to avoid competing with the embedding model for VRAM.

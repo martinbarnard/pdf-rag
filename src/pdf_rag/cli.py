@@ -125,5 +125,33 @@ def stats(
     console.print(table)
 
 
+@app.command()
+def models() -> None:
+    """List LLM models available on the local server and show active backend config."""
+    from pdf_rag.llm import LLM_BACKEND, LOCAL_LLM_BASE_URL, LOCAL_LLM_MODEL, list_local_models, probe_local
+
+    console.print(f"[bold]Backend:[/bold] [cyan]{LLM_BACKEND}[/cyan]")
+    console.print(f"[bold]Local server:[/bold] {LOCAL_LLM_BASE_URL}")
+    console.print(f"[bold]Configured model:[/bold] {LOCAL_LLM_MODEL}\n")
+
+    reachable = probe_local()
+    if not reachable:
+        console.print("[yellow]Local server not reachable.[/yellow]")
+        return
+
+    available = list_local_models()
+    if not available:
+        console.print("[yellow]No models returned by server.[/yellow]")
+        return
+
+    table = Table(title=f"Models at {LOCAL_LLM_BASE_URL}")
+    table.add_column("Model ID", style="cyan")
+    table.add_column("Active", justify="center")
+    for model_id in available:
+        active = "[green]✓[/green]" if model_id == LOCAL_LLM_MODEL else ""
+        table.add_row(model_id, active)
+    console.print(table)
+
+
 if __name__ == "__main__":
     app()
