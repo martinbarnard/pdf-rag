@@ -5,14 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pdf_rag.config import (
-    DEFAULT_DB_PATH,
-    EMBEDDING_DEVICE,
-    EMBEDDING_DEVICE_WITH_LOCAL_LLM,
-)
+from pdf_rag.config import DEFAULT_DB_PATH
 from pdf_rag.graph.store import GraphStore
 from pdf_rag.ingestion.embedder import Embedder
-from pdf_rag.llm import call_llm, probe_local
+from pdf_rag.llm import call_llm
 
 
 @dataclass
@@ -48,9 +44,7 @@ def retrieve(
         RetrievalResult with chunks, assembled context, and Claude's answer.
     """
     db_path = db_path or DEFAULT_DB_PATH
-    if embedder is None:
-        device = EMBEDDING_DEVICE_WITH_LOCAL_LLM if probe_local() else EMBEDDING_DEVICE
-        embedder = Embedder(device=device)
+    embedder = embedder or Embedder()
     store = GraphStore(db_path)
 
     # 1. Embed query

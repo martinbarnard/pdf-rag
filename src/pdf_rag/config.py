@@ -24,6 +24,14 @@ CHUNK_OVERLAP: int = 64
 # all-MiniLM-L6-v2: 384, Qwen3-Embedding-0.6B: 1024
 EMBEDDING_DIM: int = 1024
 
+# Embedding backend:
+#   "auto"      — use LM Studio /v1/embeddings if reachable, else sentence-transformers
+#   "local"     — always use LM Studio /v1/embeddings
+#   "local_st"  — always use sentence-transformers in-process
+EMBEDDING_BACKEND: str = "auto"
+LOCAL_EMBEDDING_BASE_URL: str = "http://localhost:1234"   # LM Studio default
+LOCAL_EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-0.6B"  # must be loaded in LM Studio
+
 # LLM backend selection:
 #   "anthropic" — always use Anthropic Claude (requires ANTHROPIC_API_KEY)
 #   "local"     — always use local OpenAI-compatible server (LM Studio / Ollama)
@@ -34,11 +42,8 @@ LOCAL_LLM_MODEL: str = "qwen/qwen3.5-9b"             # model tag as loaded in LM
 LOCAL_LLM_PROBE_TIMEOUT: float = 3.0                 # seconds to wait when probing local server
 
 # Device placement for ML models.
-# GLiNER defaults to CPU to avoid competing with the embedding model for VRAM.
-# EMBEDDING_DEVICE_WITH_LOCAL_LLM: when a local LLM server (LM Studio/Ollama) is
-# active it already occupies most VRAM; switch the embedder to CPU to avoid OOM.
-# Set EMBEDDING_DEVICE="cuda" and EMBEDDING_DEVICE_WITH_LOCAL_LLM="cuda" only if
-# you have >16 GB VRAM and want maximum throughput.
-EMBEDDING_DEVICE: str = "cuda"              # used when no local LLM is running
-EMBEDDING_DEVICE_WITH_LOCAL_LLM: str = "cpu"  # used when local LLM server is reachable
-GLINER_DEVICE: str = "cpu"                  # always CPU to avoid OOM during ingest
+# EMBEDDING_DEVICE is only used when EMBEDDING_BACKEND="local_st" (sentence-transformers
+# in-process). When EMBEDDING_BACKEND="auto" or "local", embeddings are offloaded to
+# LM Studio and no GPU memory is used by the embedder.
+EMBEDDING_DEVICE: str = "cpu"   # fallback device for in-process sentence-transformers
+GLINER_DEVICE: str = "cpu"      # always CPU to avoid OOM during ingest
