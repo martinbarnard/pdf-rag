@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 
 router = APIRouter(tags=["graph"])
 
@@ -124,6 +125,34 @@ async def paper_detail(paper_id: str, request: Request) -> dict:
     cites_count = cr2.get_next()[0] if cr2.has_next() else 0
 
     return {**paper, "authors": authors, "topics": topics, "cited_by": cited_by_count, "cites": cites_count}
+
+
+@router.get("/papers/{paper_id}/pdf")
+async def paper_pdf(paper_id: str, request: Request) -> FileResponse:
+    """Stream the source PDF for a paper directly from disk.
+
+    Only works when file_path ends in .pdf and the file still exists.
+    Used by the embedded PDF viewer in the frontend.
+    """
+    store = _store(request)
+    r = store.execute(
+        "MATCH (p:Paper {id: $id}) RETURN p.file_path",
+        {"id": paper_id},
+    )
+    if not r.has_next():
+        raise HTTPException(status_code=404, detail="Paper not found")
+    file_path = r.get_next()[0]
+    if not file_path:
+        raise HTTPException(status_code=404, detail="No file path stored for this paper")
+
+    from pathlib import Path as _Path
+    path = _Path(file_path)
+    if path.suffix.lower() != ".pdf":
+        raise HTTPException(status_code=415, detail="Source file is not a PDF")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"File not found on disk: {file_path}")
+
+    return FileResponse(str(path), media_type="application/pdf", filename=path.name)
 
 
 @router.get("/graph/overview")

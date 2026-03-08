@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
-import { FileText, ChevronRight, User, Tag, Quote, BookOpen } from 'lucide-react'
+import { FileText, ChevronRight, User, Tag, Quote, BookOpen, FileSearch, ChevronDown, ChevronUp } from 'lucide-react'
 
 interface PaperSummary {
   id: string
@@ -52,6 +52,34 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
   )
 }
 
+function PdfViewer({ paperId }: { paperId: string }) {
+  const [open, setOpen] = useState(false)
+  const url = `/api/papers/${paperId}/pdf`
+
+  return (
+    <div className="border border-gray-800 rounded-lg overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-900 hover:bg-gray-800 transition-colors text-sm text-gray-300"
+      >
+        <span className="flex items-center gap-2">
+          <FileSearch size={14} className="text-indigo-400" />
+          View PDF
+        </span>
+        {open ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
+      </button>
+      {open && (
+        <iframe
+          src={url}
+          title="PDF viewer"
+          className="w-full bg-gray-950"
+          style={{ height: '70vh' }}
+        />
+      )}
+    </div>
+  )
+}
+
 export default function PaperBrowser() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -71,6 +99,8 @@ export default function PaperBrowser() {
     selectedId ? `/api/papers/${selectedId}` : '',
     [selectedId]
   )
+
+  const isPdf = detail?.file_path?.toLowerCase().endsWith('.pdf') ?? false
 
   return (
     <div className="flex h-full">
@@ -184,6 +214,9 @@ export default function PaperBrowser() {
                 ))}
               </Section>
             )}
+
+            {/* PDF viewer */}
+            {isPdf && <PdfViewer paperId={detail.id} />}
 
             {/* File path */}
             {detail.file_path && (
