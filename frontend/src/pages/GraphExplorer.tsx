@@ -35,6 +35,26 @@ interface ArxivResult {
   similarity_score: number
 }
 
+// Rich detail fetched from the DB for real nodes
+interface NodeDetail {
+  // Paper fields
+  abstract?: string
+  summary?: string
+  year?: number
+  doi?: string
+  arxiv_id?: string
+  file_path?: string
+  authors?: { id: string; canonical_name: string }[]
+  topics?: { id: string; canonical_name: string }[]
+  cited_by?: number
+  cites?: number
+  // Author fields
+  papers?: { id: string; title: string; year: number }[]
+  coauthors?: { id: string; canonical_name: string; shared: number }[]
+  // Topic fields
+  related?: { id: string; canonical_name: string; weight: number }[]
+}
+
 type Layout = 'fcose' | 'breadthfirst' | 'circle'
 const LAYOUTS: { key: Layout; label: string }[] = [
   { key: 'fcose',        label: 'Force'  },
@@ -62,16 +82,23 @@ export default function GraphExplorer() {
   const [layout,  setLayout]  = useState<Layout>('fcose')
   useEffect(() => { layoutRef.current = layout }, [layout])
 
-  const [selected,    setSelected]    = useState<{ id: string; type: string; label: string } | null>(null)
-  const [ghostDetail, setGhostDetail] = useState<ArxivResult | null>(null)
-  const [expanding,   setExpanding]   = useState(false)
+  const [selected,     setSelected]     = useState<{ id: string; type: string; label: string } | null>(null)
+  const [nodeDetail,   setNodeDetail]   = useState<NodeDetail | null>(null)
+  const [detailLoading,setDetailLoading]= useState(false)
+  const [ghostDetail,  setGhostDetail]  = useState<ArxivResult | null>(null)
+  const [expanding,    setExpanding]    = useState(false)
 
+  // arXiv drawer (toolbar search + related search)
   const [arxivPanelOpen,  setArxivPanelOpen]  = useState(false)
   const [arxivQuery,      setArxivQuery]      = useState('')
   const [arxivSearching,  setArxivSearching]  = useState(false)
   const [arxivResults,    setArxivResults]    = useState<ArxivResult[]>([])
   const [arxivAttribution,setArxivAttribution]= useState('')
   const [arxivError,      setArxivError]      = useState<string | null>(null)
+
+  // arXiv search results shown inline in the node detail panel (for ghost author/topic)
+  const [panelArxivResults,  setPanelArxivResults]  = useState<ArxivResult[]>([])
+  const [panelArxivSearching,setPanelArxivSearching]= useState(false)
 
   const [ingestState, setIngestState] = useState<Record<string, 'idle' | 'ingesting' | 'done' | 'error'>>({})
 
@@ -83,16 +110,16 @@ export default function GraphExplorer() {
       animate: true,
       animationDuration: 500,
       ...(name === 'fcose' ? {
-        quality: 'proof',           // minimise edge crossings
+        quality: 'proof',
         randomize: false,
         nodeDimensionsIncludeLabels: true,
-        nodeRepulsion: 18000,       // strong repulsion prevents overlaps
+        nodeRepulsion: 18000,
         idealEdgeLength: 150,
         edgeElasticity: 0.3,
         gravity: 0.2,
         gravityRange: 3.8,
         numIter: 5000,
-        tile: true,                 // tile disconnected components so they don't overlap
+        tile: true,
         tilingPaddingVertical: 30,
         tilingPaddingHorizontal: 30,
       } : {}),
@@ -155,7 +182,7 @@ export default function GraphExplorer() {
         name: 'fcose',
         animate: true,
         animationDuration: 450,
-        fit: false,        // never auto-zoom — user controls viewport
+        fit: false,
         quality: 'proof',
         randomize: false,
         nodeDimensionsIncludeLabels: true,
@@ -175,12 +202,10 @@ export default function GraphExplorer() {
     }
   }, [runLayout])
 
-  const addGhostResults = useCallback((results: ArxivResult[]) => {
+  const addGhostResults = useCallback((results: ArxivResult[], anchorId: string | null = null) => {
     const cy = cyRef.current
 
-    // Always populate the map regardless of whether the graph is ready —
-    // the tap handler reads from the map, so we must populate it even if
-    // we can't add nodes to the canvas yet.
+    // Always populate the map regardless of whether the graph is ready
     for (const r of results) {
       ghostResultsRef.current.set(ghostPaperId(r.arxiv_id), r)
     }
@@ -191,7 +216,6 @@ export default function GraphExplorer() {
 
     for (const r of results) {
       const paperId = ghostPaperId(r.arxiv_id)
-      // map already set above
 
       if (!cy.getElementById(paperId).length) {
         toAdd.push({ data: { id: paperId, label: r.title, type: 'GhostPaper' } })
@@ -217,7 +241,7 @@ export default function GraphExplorer() {
     }
 
     if (toAdd.length) {
-      addAndSettle(cy, toAdd, null)
+      addAndSettle(cy, toAdd, anchorId)
     }
   }, [addAndSettle])
 
@@ -252,11 +276,60 @@ export default function GraphExplorer() {
       const data = await resp.json()
       setArxivResults(data.results)
       setArxivAttribution(data.attribution)
-      addGhostResults(data.results)
+      addGhostResults(data.results, paperId)
     } catch (e) {
       setArxivError(String(e))
     } finally {
       setArxivSearching(false)
+    }
+  }, [addGhostResults])
+
+  /** Fetch DB detail for a real node and populate the panel. */
+  const fetchNodeDetail = useCallback(async (id: string, type: string) => {
+    setDetailLoading(true)
+    setNodeDetail(null)
+    try {
+      if (type === 'Paper') {
+        const r = await fetch(`/api/papers/${encodeURIComponent(id)}`)
+        if (r.ok) setNodeDetail(await r.json())
+      } else if (type === 'Author') {
+        const [papersR, coR] = await Promise.all([
+          fetch(`/api/authors/${encodeURIComponent(id)}/papers`),
+          fetch(`/api/authors/${encodeURIComponent(id)}/coauthors`),
+        ])
+        const papers   = papersR.ok   ? await papersR.json()   : []
+        const coauthors= coR.ok       ? await coR.json()       : []
+        setNodeDetail({ papers, coauthors })
+      } else if (type === 'Topic') {
+        const [papersR, relR] = await Promise.all([
+          fetch(`/api/topics/${encodeURIComponent(id)}/papers`),
+          fetch(`/api/topics/${encodeURIComponent(id)}/related`),
+        ])
+        const papers  = papersR.ok ? await papersR.json() : []
+        const related = relR.ok   ? await relR.json()    : []
+        setNodeDetail({ papers, related })
+      }
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [])
+
+  /** arXiv search shown inline in the node detail panel (ghost author/topic tap). */
+  const searchPanelArxiv = useCallback(async (terms: string[], author = '') => {
+    setPanelArxivSearching(true)
+    setPanelArxivResults([])
+    try {
+      const resp = await fetch('/api/arxiv/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ terms, author, top_k: 10 }),
+      })
+      if (!resp.ok) throw new Error(`${resp.status}`)
+      const data = await resp.json()
+      setPanelArxivResults(data.results)
+      addGhostResults(data.results)
+    } finally {
+      setPanelArxivSearching(false)
     }
   }, [addGhostResults])
 
@@ -306,7 +379,7 @@ export default function GraphExplorer() {
     } catch {
       setIngestState(s => ({ ...s, [arxiv_id]: 'error' }))
     }
-  }, [runLayout])
+  }, [addAndSettle])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -339,6 +412,9 @@ export default function GraphExplorer() {
           const type  = node.data('type') as string
           const label = node.data('label') as string
           setSelected({ id, type, label })
+          setNodeDetail(null)
+          setGhostDetail(null)
+          setPanelArxivResults([])
 
           if (type === 'GhostPaper') {
             const cached = ghostResultsRef.current.get(id) ?? null
@@ -346,7 +422,6 @@ export default function GraphExplorer() {
               setGhostDetail(cached)
             } else {
               // DB-origin stub: fetch detail lazily from the API
-              setGhostDetail(null)
               fetch(`/api/papers/${encodeURIComponent(id)}`)
                 .then(r => r.ok ? r.json() : null)
                 .then((paper: any) => {
@@ -364,13 +439,26 @@ export default function GraphExplorer() {
                   ghostResultsRef.current.set(id, synthetic)
                   setGhostDetail(synthetic)
                 })
-                .catch(() => {/* leave panel showing "Detail unavailable" */})
+                .catch(() => {})
             }
             return
           }
-          setGhostDetail(null)
 
-          // Auto-expand real nodes on first tap
+          if (type === 'GhostAuthor') {
+            // Strip ghost prefix to get real name, search arXiv inline
+            const name = label
+            searchPanelArxiv([], name)
+            return
+          }
+
+          if (type === 'GhostTopic') {
+            searchPanelArxiv([label])
+            return
+          }
+
+          // Real node — fetch detail and auto-expand
+          fetchNodeDetail(id, type)
+
           if (!expandedRef.current.has(id)) {
             const toAdd: cytoscape.ElementDefinition[] = []
             const edges = data.edges.filter(e => e.data.source === id || e.data.target === id)
@@ -388,7 +476,12 @@ export default function GraphExplorer() {
         })
 
         cy.on('tap', (evt) => {
-          if (evt.target === cy) { setSelected(null); setGhostDetail(null) }
+          if (evt.target === cy) {
+            setSelected(null)
+            setGhostDetail(null)
+            setNodeDetail(null)
+            setPanelArxivResults([])
+          }
         })
 
         cy.on('cxttap', 'node', (evt) => {
@@ -417,7 +510,7 @@ export default function GraphExplorer() {
       .catch(e => { setError(String(e)); setLoading(false) })
 
     return () => { cyRef.current?.destroy(); cyRef.current = null }
-  }, [runLayout, addAndSettle, searchArxiv, searchRelatedArxiv])
+  }, [runLayout, addAndSettle, searchArxiv, searchRelatedArxiv, fetchNodeDetail, searchPanelArxiv])
 
   useEffect(() => {
     if (cyRef.current) runLayout(cyRef.current, layout)
@@ -458,7 +551,23 @@ export default function GraphExplorer() {
 
   const isExpanded = selected ? expandedRef.current.has(selected.id) : false
   const isGhost    = selected?.type?.startsWith('Ghost') ?? false
-  const isRealNode = selected && !isGhost
+
+  // ── Ingest button shared renderer ───────────────────────────────────────────
+  const IngestBtn = ({ arxiv_id }: { arxiv_id: string }) => {
+    const state = ingestState[arxiv_id] ?? 'idle'
+    if (state === 'done')  return <span className="text-xs text-green-400">Ingested ✓</span>
+    if (state === 'error') return <span className="text-xs text-red-400">Ingest failed</span>
+    return (
+      <button
+        onClick={() => ingestGhost(arxiv_id)}
+        disabled={state === 'ingesting'}
+        className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-xs text-white transition-colors">
+        {state === 'ingesting'
+          ? <><RefreshCw size={11} className="animate-spin" /> Ingesting…</>
+          : <><Download size={11} /> Ingest</>}
+      </button>
+    )
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -473,7 +582,7 @@ export default function GraphExplorer() {
           ))}
         </div>
         <div className="w-px h-5 bg-gray-700" />
-        <span className="text-xs text-gray-500">Click to expand · Right-click to search arXiv</span>
+        <span className="text-xs text-gray-500">Click node for details · Right-click to search arXiv</span>
 
         <div className="ml-auto flex items-center gap-2">
           <form onSubmit={e => {
@@ -490,7 +599,7 @@ export default function GraphExplorer() {
               <Search size={13} />
             </button>
           </form>
-          <button onClick={() => cyRef.current?.fit(undefined, 40)} title="Fit"
+          <button onClick={() => cyRef.current?.fit(undefined, 40)} title="Fit graph"
             className="p-1.5 rounded bg-gray-800 text-gray-400 hover:bg-gray-700">
             <LayoutGrid size={14} />
           </button>
@@ -507,104 +616,318 @@ export default function GraphExplorer() {
         {error && <ErrorBox message={error} />}
         <div ref={containerRef} className="flex-1 bg-gray-950" />
 
-        {/* Node detail panel */}
+        {/* ── Node detail panel ───────────────────────────────────────── */}
         {selected && (
-          <div className="w-64 shrink-0 bg-gray-900 border-l border-gray-800 p-4 flex flex-col gap-3 overflow-y-auto">
-            <div className="flex items-start justify-between">
-              <div>
+          <div className="w-72 shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="px-4 py-3 border-b border-gray-800 shrink-0 flex items-start justify-between gap-2">
+              <div className="min-w-0">
                 <span className="inline-block px-2 py-0.5 rounded text-xs font-medium mb-1"
                   style={{ background: (NODE_COLOURS[selected.type] ?? '#6b7280') + '33', color: NODE_COLOURS[selected.type] ?? '#e5e7eb' }}>
                   {isGhost ? `arXiv ${selected.type.replace('Ghost', '')}` : selected.type}
                 </span>
-                <p className="text-sm font-medium text-gray-100 leading-snug">{selected.label}</p>
+                <p className="text-sm font-semibold text-gray-100 leading-snug">{selected.label}</p>
               </div>
-              <button onClick={() => { setSelected(null); setGhostDetail(null) }}
-                className="text-gray-600 hover:text-gray-300"><X size={14} /></button>
+              <button onClick={() => { setSelected(null); setGhostDetail(null); setNodeDetail(null); setPanelArxivResults([]) }}
+                className="text-gray-600 hover:text-gray-300 shrink-0 mt-0.5"><X size={14} /></button>
             </div>
 
-            {/* Ghost paper: show abstract, authors, ingest button */}
-            {selected.type === 'GhostPaper' && (() => {
-              // Read from ref directly at render time — covers the race where the
-              // tap handler fired before addGhostResults populated the map.
-              const d = ghostDetail ?? ghostResultsRef.current.get(selected.id) ?? null
-              if (!d) return <p className="text-xs text-gray-500 italic text-center">Detail unavailable</p>
-              const state = ingestState[d.arxiv_id] ?? 'idle'
-              return (
-                <>
-                  <p className="text-xs text-gray-400 leading-relaxed line-clamp-4">{d.abstract}</p>
-                  <div className="text-xs text-gray-500 space-y-0.5">
-                    <p>{d.authors.slice(0, 3).join(', ')}{d.authors.length > 3 ? ' et al.' : ''}</p>
-                    <p>{d.published.slice(0, 4)} · {d.categories.slice(0, 2).join(', ')}</p>
+            <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
+
+              {/* ── Ghost Paper ── */}
+              {selected.type === 'GhostPaper' && (() => {
+                const d = ghostDetail ?? ghostResultsRef.current.get(selected.id) ?? null
+                if (!d) return (
+                  <div className="flex items-center justify-center py-6">
+                    <Spinner label="Loading…" />
                   </div>
-                  {state === 'done' ? (
-                    <p className="text-xs text-green-400 text-center">Ingested ✓</p>
-                  ) : state === 'error' ? (
-                    <p className="text-xs text-red-400 text-center">Ingest failed</p>
-                  ) : (
-                    <button
-                      onClick={() => ingestGhost(d.arxiv_id)}
-                      disabled={state === 'ingesting'}
-                      className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-sm text-white transition-colors">
-                      {state === 'ingesting'
-                        ? <><RefreshCw size={13} className="animate-spin" /> Ingesting…</>
-                        : <><Download size={13} /> Ingest paper</>}
-                    </button>
+                )
+                const arxivUrl = d.arxiv_id ? `https://arxiv.org/abs/${d.arxiv_id}` : d.pdf_url
+                return (
+                  <>
+                    {d.abstract && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-400 mb-1">Abstract</p>
+                        <p className="text-xs text-gray-300 leading-relaxed">{d.abstract}</p>
+                      </div>
+                    )}
+                    {d.authors.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-400 mb-1">Authors</p>
+                        <p className="text-xs text-gray-300">{d.authors.join(', ')}</p>
+                      </div>
+                    )}
+                    {d.categories.length > 0 && (
+                      <div>
+                        <p className="text-xs font-medium text-gray-400 mb-1">Categories</p>
+                        <p className="text-xs text-gray-300">{d.categories.join(', ')}</p>
+                      </div>
+                    )}
+                    {d.published && (
+                      <p className="text-xs text-gray-500">{d.published.slice(0, 4)}</p>
+                    )}
+                    <div className="flex flex-col gap-2 pt-1">
+                      <IngestBtn arxiv_id={d.arxiv_id} />
+                      {arxivUrl && (
+                        <a href={arxivUrl} target="_blank" rel="noreferrer"
+                          className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
+                          <ExternalLink size={11} /> View on arXiv
+                        </a>
+                      )}
+                    </div>
+                  </>
+                )
+              })()}
+
+              {/* ── Ghost Author: inline arXiv search ── */}
+              {selected.type === 'GhostAuthor' && (
+                <>
+                  <p className="text-xs text-gray-400">Papers by this author on arXiv:</p>
+                  {panelArxivSearching && <Spinner label="Searching…" />}
+                  {panelArxivResults.map(r => (
+                    <div key={r.arxiv_id} className="border border-gray-800 rounded p-2.5 flex flex-col gap-1.5">
+                      <p className="text-xs font-medium text-gray-100 leading-snug">{r.title}</p>
+                      <p className="text-xs text-gray-500">{r.published.slice(0, 4)} · {r.categories.slice(0, 2).join(', ')}</p>
+                      <p className="text-xs text-gray-400 line-clamp-2">{r.abstract}</p>
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <IngestBtn arxiv_id={r.arxiv_id} />
+                        <a href={`https://arxiv.org/abs/${r.arxiv_id}`} target="_blank" rel="noreferrer"
+                          className="flex items-center gap-0.5 text-xs text-indigo-400 hover:text-indigo-300">
+                          <ExternalLink size={10} /> arXiv
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                  {!panelArxivSearching && panelArxivResults.length === 0 && (
+                    <p className="text-xs text-gray-600 italic">No results</p>
                   )}
-                  <a href={d.pdf_url} target="_blank" rel="noreferrer"
-                    className="flex items-center justify-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
-                    <ExternalLink size={11} /> View on arXiv
-                  </a>
                 </>
-              )
-            })()}
+              )}
 
-            {/* Ghost author/topic: just a label */}
-            {isGhost && selected.type !== 'GhostPaper' && (
-              <p className="text-xs text-gray-500 text-center italic">arXiv metadata node</p>
-            )}
+              {/* ── Ghost Topic: inline arXiv search ── */}
+              {selected.type === 'GhostTopic' && (
+                <>
+                  <p className="text-xs text-gray-400">arXiv papers on this topic:</p>
+                  {panelArxivSearching && <Spinner label="Searching…" />}
+                  {panelArxivResults.map(r => (
+                    <div key={r.arxiv_id} className="border border-gray-800 rounded p-2.5 flex flex-col gap-1.5">
+                      <p className="text-xs font-medium text-gray-100 leading-snug">{r.title}</p>
+                      <p className="text-xs text-gray-500">
+                        {r.authors.slice(0, 2).join(', ')}{r.authors.length > 2 ? ' et al.' : ''} · {r.published.slice(0, 4)}
+                      </p>
+                      <p className="text-xs text-gray-400 line-clamp-2">{r.abstract}</p>
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <IngestBtn arxiv_id={r.arxiv_id} />
+                        <a href={`https://arxiv.org/abs/${r.arxiv_id}`} target="_blank" rel="noreferrer"
+                          className="flex items-center gap-0.5 text-xs text-indigo-400 hover:text-indigo-300">
+                          <ExternalLink size={10} /> arXiv
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                  {!panelArxivSearching && panelArxivResults.length === 0 && (
+                    <p className="text-xs text-gray-600 italic">No results</p>
+                  )}
+                </>
+              )}
 
-            {/* Real node actions */}
-            {isRealNode && (
-              <>
-                {!isExpanded ? (
-                  <button onClick={expandNode} disabled={expanding}
-                    className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-sm text-gray-200 transition-colors">
-                    {expanding ? <RefreshCw size={13} className="animate-spin" /> : <ChevronDown size={13} />}
-                    Expand neighbours
-                  </button>
-                ) : (
-                  <p className="text-xs text-gray-600 text-center">Neighbours shown</p>
-                )}
+              {/* ── Real Paper ── */}
+              {selected.type === 'Paper' && (
+                <>
+                  {detailLoading && <Spinner label="Loading…" />}
+                  {nodeDetail && (
+                    <>
+                      {(nodeDetail.abstract || nodeDetail.summary) && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-400 mb-1">Abstract</p>
+                          <p className="text-xs text-gray-300 leading-relaxed line-clamp-6">
+                            {nodeDetail.abstract || nodeDetail.summary}
+                          </p>
+                        </div>
+                      )}
+                      {nodeDetail.authors && nodeDetail.authors.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-400 mb-1">Authors</p>
+                          <div className="flex flex-wrap gap-1">
+                            {nodeDetail.authors.map(a => (
+                              <span key={a.id} className="px-1.5 py-0.5 rounded bg-green-900/40 text-green-300 text-xs">
+                                {a.canonical_name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {nodeDetail.topics && nodeDetail.topics.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-400 mb-1">Topics</p>
+                          <div className="flex flex-wrap gap-1">
+                            {nodeDetail.topics.map(t => (
+                              <span key={t.id} className="px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 text-xs">
+                                {t.canonical_name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      <div className="flex gap-4 text-xs text-gray-500">
+                        {nodeDetail.year && <span>{nodeDetail.year}</span>}
+                        {nodeDetail.cited_by != null && <span>Cited by {nodeDetail.cited_by}</span>}
+                        {nodeDetail.cites   != null && <span>Cites {nodeDetail.cites}</span>}
+                      </div>
+                      {nodeDetail.doi && (
+                        <a href={`https://doi.org/${nodeDetail.doi}`} target="_blank" rel="noreferrer"
+                          className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
+                          <ExternalLink size={11} /> DOI
+                        </a>
+                      )}
+                    </>
+                  )}
+                  <div className="flex flex-col gap-2 pt-1 border-t border-gray-800">
+                    {!isExpanded ? (
+                      <button onClick={expandNode} disabled={expanding}
+                        className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-sm text-gray-200 transition-colors">
+                        {expanding ? <RefreshCw size={13} className="animate-spin" /> : <ChevronDown size={13} />}
+                        Expand neighbours
+                      </button>
+                    ) : (
+                      <p className="text-xs text-gray-600 text-center">Neighbours shown</p>
+                    )}
+                    <button
+                      onClick={() => { setArxivPanelOpen(true); searchRelatedArxiv(selected.id) }}
+                      className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors">
+                      <Search size={13} /> Related on arXiv
+                    </button>
+                    <button onClick={goToDetail}
+                      className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 text-sm text-white transition-colors">
+                      Open full view →
+                    </button>
+                  </div>
+                </>
+              )}
 
-                {(selected.type === 'Topic' || selected.type === 'Author' || selected.type === 'Paper') && (
-                  <button
-                    onClick={() => {
-                      setArxivPanelOpen(true)
-                      if (selected.type === 'Paper') {
-                        searchRelatedArxiv(selected.id)
-                      } else if (selected.type === 'Topic') {
-                        setArxivQuery(selected.label)
-                        searchArxiv([selected.label])
-                      } else {
-                        setArxivQuery(selected.label)
-                        searchArxiv([], selected.label)
-                      }
-                    }}
-                    className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors">
-                    <Search size={13} /> Search arXiv
-                  </button>
-                )}
+              {/* ── Real Author ── */}
+              {selected.type === 'Author' && (
+                <>
+                  {detailLoading && <Spinner label="Loading…" />}
+                  {nodeDetail && (
+                    <>
+                      {nodeDetail.papers && nodeDetail.papers.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-400 mb-1">Papers ({nodeDetail.papers.length})</p>
+                          <div className="flex flex-col gap-1">
+                            {nodeDetail.papers.slice(0, 8).map((p: any) => (
+                              <p key={p.id} className="text-xs text-gray-300 leading-snug">
+                                {p.title || p.id}
+                                {p.year ? <span className="text-gray-600 ml-1">({p.year})</span> : null}
+                              </p>
+                            ))}
+                            {nodeDetail.papers.length > 8 && (
+                              <p className="text-xs text-gray-600">+{nodeDetail.papers.length - 8} more</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {nodeDetail.coauthors && nodeDetail.coauthors.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-400 mb-1">Co-authors</p>
+                          <div className="flex flex-wrap gap-1">
+                            {nodeDetail.coauthors.slice(0, 10).map((a: any) => (
+                              <span key={a.id} className="px-1.5 py-0.5 rounded bg-green-900/40 text-green-300 text-xs">
+                                {a.canonical_name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <div className="flex flex-col gap-2 pt-1 border-t border-gray-800">
+                    {!isExpanded ? (
+                      <button onClick={expandNode} disabled={expanding}
+                        className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-sm text-gray-200 transition-colors">
+                        {expanding ? <RefreshCw size={13} className="animate-spin" /> : <ChevronDown size={13} />}
+                        Expand neighbours
+                      </button>
+                    ) : (
+                      <p className="text-xs text-gray-600 text-center">Neighbours shown</p>
+                    )}
+                    <button
+                      onClick={() => { setArxivPanelOpen(true); setArxivQuery(selected.label); searchArxiv([], selected.label) }}
+                      className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors">
+                      <Search size={13} /> Search arXiv
+                    </button>
+                    <button onClick={goToDetail}
+                      className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 text-sm text-white transition-colors">
+                      Open full view →
+                    </button>
+                  </div>
+                </>
+              )}
 
-                <button onClick={goToDetail}
-                  className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 text-sm text-white transition-colors">
-                  Open detail view →
-                </button>
-              </>
-            )}
+              {/* ── Real Topic ── */}
+              {selected.type === 'Topic' && (
+                <>
+                  {detailLoading && <Spinner label="Loading…" />}
+                  {nodeDetail && (
+                    <>
+                      {nodeDetail.papers && nodeDetail.papers.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-400 mb-1">Papers ({nodeDetail.papers.length})</p>
+                          <div className="flex flex-col gap-1">
+                            {nodeDetail.papers.slice(0, 8).map((p: any) => (
+                              <p key={p.id} className="text-xs text-gray-300 leading-snug">
+                                {p.title || p.id}
+                                {p.year ? <span className="text-gray-600 ml-1">({p.year})</span> : null}
+                              </p>
+                            ))}
+                            {nodeDetail.papers.length > 8 && (
+                              <p className="text-xs text-gray-600">+{nodeDetail.papers.length - 8} more</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {nodeDetail.related && nodeDetail.related.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-gray-400 mb-1">Related topics</p>
+                          <div className="flex flex-wrap gap-1">
+                            {nodeDetail.related.slice(0, 10).map((t: any) => (
+                              <span key={t.id} className="px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 text-xs">
+                                {t.canonical_name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <div className="flex flex-col gap-2 pt-1 border-t border-gray-800">
+                    {!isExpanded ? (
+                      <button onClick={expandNode} disabled={expanding}
+                        className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-sm text-gray-200 transition-colors">
+                        {expanding ? <RefreshCw size={13} className="animate-spin" /> : <ChevronDown size={13} />}
+                        Expand neighbours
+                      </button>
+                    ) : (
+                      <p className="text-xs text-gray-600 text-center">Neighbours shown</p>
+                    )}
+                    <button
+                      onClick={() => { setArxivPanelOpen(true); setArxivQuery(selected.label); searchArxiv([selected.label]) }}
+                      className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm text-gray-200 transition-colors">
+                      <Search size={13} /> Search arXiv
+                    </button>
+                    <button onClick={goToDetail}
+                      className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 text-sm text-white transition-colors">
+                      Open full view →
+                    </button>
+                  </div>
+                </>
+              )}
+
+            </div>
           </div>
         )}
 
-        {/* arXiv results panel */}
+        {/* ── arXiv results drawer (toolbar search / right-click) ─────── */}
         {arxivPanelOpen && (
           <div className="w-80 shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
@@ -650,7 +973,7 @@ export default function GraphExplorer() {
                               : <><Download size={10} /> Ingest</>}
                           </button>
                         )}
-                        <a href={r.pdf_url} target="_blank" rel="noreferrer"
+                        <a href={`https://arxiv.org/abs/${r.arxiv_id}`} target="_blank" rel="noreferrer"
                           className="flex items-center gap-0.5 text-xs text-indigo-400 hover:text-indigo-300">
                           <ExternalLink size={10} /> arXiv
                         </a>
