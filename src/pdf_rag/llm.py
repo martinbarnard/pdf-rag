@@ -130,36 +130,17 @@ def _call_anthropic(context: str, query: str) -> str:
     return message.content[0].text
 
 
-_TITLE_PROMPT = "Title (10 words max) for this text:\n\n{excerpt}"
-
-# Patterns that indicate a line is model narration, not the title itself
-import re as _re
-_JUNK_LINE = _re.compile(
-    r"^(thinking|constraint|step|note|output|title|here|sure|okay|certainly|"
-    r"the title|a title|:\s*$|\*|\d+\.)",
-    _re.IGNORECASE,
-)
+_TITLE_PROMPT = "Write a title (10 words or fewer) for this text:\n\n{excerpt}"
 
 
 def _extract_title(raw: str, fallback: str) -> str:
-    """Extract a clean title from a model response that may contain narration.
-
-    Strips <think> blocks, then returns the last line that doesn't look like
-    model self-narration (constraint lists, preamble, bullet points, etc.).
-    Falls back to the last non-empty line if all lines look like junk.
-    """
+    """Return the first non-empty line from the model response, stripped of decoration."""
     cleaned = _strip_thinking(raw)
-    lines = [
-        l.strip().strip("*").strip("-").strip('"').strip("'").strip()
-        for l in cleaned.splitlines()
-        if l.strip()
-    ]
-    # Prefer the last line that doesn't match known junk patterns
-    candidates = [l for l in lines if l and not _JUNK_LINE.search(l)]
-    if candidates:
-        return candidates[-1]
-    # Last resort: last non-empty line
-    return lines[-1] if lines else fallback
+    for line in cleaned.splitlines():
+        line = line.strip().strip("*").strip("-").strip('"').strip("'").strip()
+        if line:
+            return line
+    return fallback
 
 
 def generate_title(text: str, backend: str | None = None, fallback: str = "Untitled") -> str:
@@ -209,23 +190,27 @@ def _call_anthropic_raw(prompt: str) -> str:
     return message.content[0].text
 
 
-def _call_local_raw(prompt: str, system: str | None = None) -> str:
-    """Call local OpenAI-compatible server with a single user prompt."""
-    import httpx
+def _call_local_raw(prompt: str) -> str:
+    """Call local OpenAI-compatible server with a single user prompt.
 
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+    Uses an empty assistant prefill so Qwen3 and similar thinking models skip
+    the reasoning narration and complete directly into the answer.
+    """
+    import httpx
 
     url = LOCAL_LLM_BASE_URL.rstrip("/") + "/v1/chat/completions"
     resp = httpx.post(
         url,
         json={
             "model": LOCAL_LLM_MODEL,
-            "messages": messages,
+            "messages": [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": ""},  # prefill — skip preamble
+            ],
             "max_tokens": 64,
             "temperature": 0.2,
+            # LM Studio / llama.cpp Qwen3 extension — disable thinking mode
+            "chat_template_kwargs": {"enable_thinking": False},
         },
         timeout=30.0,
     )
