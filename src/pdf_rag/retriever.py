@@ -55,26 +55,71 @@ def retrieve(
     if not chunks:
         return RetrievalResult(chunks=[], context="", answer=_call_claude("", query), sources=[])
 
-    # 3. Graph context expansion — find papers and topics for retrieved chunks
+    # 3. Graph context expansion
     context_parts: list[str] = []
     sources: list[str] = []
+    paper_ids: list[str] = []
 
-    # Get parent papers for each chunk
-    chunk_ids = [c["id"] for c in chunks]
-    for chunk_id in chunk_ids:
+    # 3a. Get parent papers for each chunk
+    for chunk in chunks:
         r = store.execute(
             "MATCH (p:Paper)-[:HAS_CHUNK]->(c:Chunk {id: $cid}) RETURN p.id, p.title, p.year",
-            {"cid": chunk_id},
+            {"cid": chunk["id"]},
         )
         while r.has_next():
             row = r.get_next()
-            paper_ref = f"{row[1]} ({row[2]})" if row[2] else row[1]
+            pid, title, year = row[0], row[1], row[2]
+            paper_ref = f"{title} ({year})" if year else title
             if paper_ref not in sources:
                 sources.append(paper_ref)
+            if pid not in paper_ids:
+                paper_ids.append(pid)
 
-    # Build context from chunks
+    # 3b. Expand: authors and topics for retrieved papers
+    graph_context_parts: list[str] = []
+    for pid in paper_ids:
+        ar = store.execute(
+            "MATCH (a:Author)-[:AUTHORED]->(p:Paper {id: $pid}) RETURN a.canonical_name",
+            {"pid": pid},
+        )
+        author_names = []
+        while ar.has_next():
+            author_names.append(ar.get_next()[0])
+
+        tr = store.execute(
+            "MATCH (p:Paper {id: $pid})-[:DISCUSSES]->(t:Topic) RETURN t.canonical_name",
+            {"pid": pid},
+        )
+        topic_names = []
+        while tr.has_next():
+            topic_names.append(tr.get_next()[0])
+
+        if author_names or topic_names:
+            parts = []
+            if author_names:
+                parts.append(f"Authors: {', '.join(author_names)}")
+            if topic_names:
+                parts.append(f"Topics: {', '.join(topic_names)}")
+            graph_context_parts.append(" | ".join(parts))
+
+    # 3c. Related topics for chunk-mentioned topics
+    for chunk in chunks:
+        tr = store.execute(
+            "MATCH (c:Chunk {id: $cid})-[:MENTIONS_TOPIC]->(t:Topic)-[:RELATED_TO]->(r:Topic) "
+            "RETURN r.canonical_name LIMIT 3",
+            {"cid": chunk["id"]},
+        )
+        related = []
+        while tr.has_next():
+            related.append(tr.get_next()[0])
+        if related:
+            graph_context_parts.append(f"Related topics: {', '.join(related)}")
+
+    # Build final context: chunks first, then graph metadata
     for chunk in chunks:
         context_parts.append(f"[{chunk['section']}] {chunk['text']}")
+    if graph_context_parts:
+        context_parts.append("Graph context: " + " | ".join(graph_context_parts))
 
     context = "\n\n".join(context_parts)
 
