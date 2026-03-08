@@ -8,7 +8,7 @@
  */
 import type { Core, NodeSingular } from 'cytoscape'
 
-const TENSION  = 0.35  // fraction of delta passed to each successive hop
+const TENSION  = 0.6   // fraction of delta passed to each successive hop
 const MAX_DEPTH = 2    // hops to drag-pull (keep low so distant nodes are stable)
 
 type Snap = { x: number; y: number; factor: number }
@@ -44,6 +44,8 @@ export function attachDragNeighbours(cy: Core): () => void {
 
   function onGrab(evt: cytoscape.EventObject) {
     if (settleTimer) { clearTimeout(settleTimer); settleTimer = null }
+    // Unlock everything — a previous settle may have left nodes locked
+    cy.nodes().unlock()
     const node = evt.target as NodeSingular
     grabPos = { ...node.position() }
     snapMap = buildSnapMap(cy, node, MAX_DEPTH, TENSION)
@@ -56,7 +58,8 @@ export function attachDragNeighbours(cy: Core): () => void {
     const dy = cur.y - grabPos.y
     snapMap.forEach((snap, id) => {
       const n = cy.getElementById(id)
-      if (n.length && !n.grabbed()) {
+      // Skip nodes that are grabbed (multi-select) or locked
+      if (n.length && !n.grabbed() && !n.locked()) {
         n.position({ x: snap.x + dx * snap.factor, y: snap.y + dy * snap.factor })
       }
     })
