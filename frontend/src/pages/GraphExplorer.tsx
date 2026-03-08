@@ -6,6 +6,7 @@ import fcose from 'cytoscape-fcose'
 import { LayoutGrid, RefreshCw, X, ChevronDown } from 'lucide-react'
 import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
+import { attachDragNeighbours } from '../utils/cyDragNeighbours'
 
 cytoscape.use(fcose)
 
@@ -112,6 +113,7 @@ export default function GraphExplorer() {
           style: STYLESHEET,
         })
         cyRef.current = cy
+        attachDragNeighbours(cy)
 
         cy.on('tap', 'node', (evt) => {
           const node = evt.target as NodeSingular

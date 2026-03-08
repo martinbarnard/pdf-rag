@@ -7,6 +7,7 @@ import { useApi } from '../hooks/useApi'
 import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
 import { Tag, ArrowLeft, FileText } from 'lucide-react'
+import { attachDragNeighbours } from '../utils/cyDragNeighbours'
 
 cytoscape.use(fcose)
 
@@ -104,6 +105,7 @@ export default function TopicDetail() {
     })
 
     cyRef.current = cy
+    attachDragNeighbours(cy)
   }, [papers, related, meta, id, topicLabel, navigate])
 
   useEffect(() => {

@@ -7,6 +7,7 @@ import { useApi } from '../hooks/useApi'
 import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
 import { Tag, ChevronRight } from 'lucide-react'
+import { attachDragNeighbours } from '../utils/cyDragNeighbours'
 
 cytoscape.use(fcose)
 
@@ -90,6 +91,7 @@ export default function TopicMap() {
     })
 
     cy.layout(FCOSE_OPTS).run()
+    attachDragNeighbours(cy)
 
     cy.on('tap', 'node', evt => {
       const node = evt.target as NodeSingular

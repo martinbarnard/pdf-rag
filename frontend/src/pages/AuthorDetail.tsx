@@ -7,6 +7,7 @@ import { useApi } from '../hooks/useApi'
 import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
 import { User, ArrowLeft, FileText } from 'lucide-react'
+import { attachDragNeighbours } from '../utils/cyDragNeighbours'
 
 cytoscape.use(fcose)
 
@@ -102,6 +103,7 @@ export default function AuthorDetail() {
     })
 
     cyRef.current = cy
+    attachDragNeighbours(cy)
   }, [papers, coauthors, meta, id, navigate])
 
   useEffect(() => {
