@@ -5,8 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from docling.document_converter import DocumentConverter
+from docling.datamodel.accelerator_options import AcceleratorOptions
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc import DocItemLabel
+
+from pdf_rag.config import DOCLING_DEVICE
 
 SUPPORTED_SUFFIXES = {".pdf", ".docx", ".md", ".html", ".htm", ".tex"}
 
@@ -46,7 +51,14 @@ def parse_document(file_path: Path) -> ParsedDocument:
             f"Supported: {sorted(SUPPORTED_SUFFIXES)}"
         )
 
-    converter = DocumentConverter()
+    pipeline_options = PdfPipelineOptions(
+        accelerator_options=AcceleratorOptions(device=DOCLING_DEVICE),
+    )
+    converter = DocumentConverter(
+        format_options={
+            InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+        }
+    )
     result = converter.convert(str(file_path))
     doc = result.document
 

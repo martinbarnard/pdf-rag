@@ -29,8 +29,8 @@ EMBEDDING_DIM: int = 1024
 #   "local"     — always use LM Studio /v1/embeddings
 #   "local_st"  — always use sentence-transformers in-process
 EMBEDDING_BACKEND: str = "auto"
-LOCAL_EMBEDDING_BASE_URL: str = "http://localhost:1234"   # LM Studio default
-LOCAL_EMBEDDING_MODEL: str = "Qwen/Qwen3-Embedding-0.6B"  # must be loaded in LM Studio
+LOCAL_EMBEDDING_BASE_URL: str = "http://localhost:1234"          # LM Studio default
+LOCAL_EMBEDDING_MODEL: str = "text-embedding-qwen3-embedding-0.6b"  # model ID as shown in LM Studio
 
 # LLM backend selection:
 #   "anthropic" — always use Anthropic Claude (requires ANTHROPIC_API_KEY)
@@ -47,3 +47,7 @@ LOCAL_LLM_PROBE_TIMEOUT: float = 3.0                 # seconds to wait when prob
 # LM Studio and no GPU memory is used by the embedder.
 EMBEDDING_DEVICE: str = "cpu"   # fallback device for in-process sentence-transformers
 GLINER_DEVICE: str = "cpu"      # always CPU to avoid OOM during ingest
+
+# Docling layout/table model device. Docling defaults to "auto" (CUDA if available),
+# which OOMs when LM Studio is also running. Set to "cpu" to be safe.
+DOCLING_DEVICE: str = "cpu"
