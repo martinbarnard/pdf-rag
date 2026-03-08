@@ -15,10 +15,14 @@ dependencies = [
     "typer",
     "anthropic",
     "rich",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
 ]
 
 [project.scripts]
 pdf-rag = "pdf_rag.cli:app"
+pdf-rag-serve = "pdf_rag.server.main:serve"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pdf_rag"]
@@ -27,8 +31,11 @@ packages = ["src/pdf_rag"]
 dev = [
     "pytest",
     "pytest-cov",
+    "pytest-asyncio",
+    "httpx",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--cov=pdf_rag --cov-report=term-missing"
+asyncio_mode = "auto"
