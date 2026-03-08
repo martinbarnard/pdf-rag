@@ -130,6 +130,76 @@ def _call_anthropic(context: str, query: str) -> str:
     return message.content[0].text
 
 
+def generate_title(text: str, backend: str | None = None, fallback: str = "Untitled") -> str:
+    """Generate a short semantic title from document text using the LLM.
+
+    Args:
+        text: Abstract or first section text to summarise.
+        backend: LLM backend override ("anthropic", "local", "auto").
+        fallback: Value to return if text is empty or the LLM call fails.
+
+    Returns:
+        A short title string (stripped of surrounding quotes/whitespace).
+    """
+    if not text or not text.strip():
+        return fallback
+
+    prompt = (
+        "Write a concise, descriptive title (10 words or fewer) for the following "
+        "academic document excerpt. Return only the title — no quotes, no explanation.\n\n"
+        f"Excerpt:\n{text[:600]}"
+    )
+    resolved = backend if backend is not None else LLM_BACKEND
+    try:
+        if resolved == "anthropic":
+            raw = _call_anthropic_raw(prompt)
+        elif resolved == "local":
+            raw = _call_local_raw(prompt)
+        else:  # auto
+            if probe_local():
+                try:
+                    raw = _call_local_raw(prompt)
+                except Exception:
+                    raw = _call_anthropic_raw(prompt)
+            else:
+                raw = _call_anthropic_raw(prompt)
+        return raw.strip().strip('"').strip("'").strip()
+    except Exception:
+        return fallback
+
+
+def _call_anthropic_raw(prompt: str) -> str:
+    """Call Anthropic Claude with a single user prompt (no system message)."""
+    import anthropic
+
+    client = anthropic.Anthropic()
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=64,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return message.content[0].text
+
+
+def _call_local_raw(prompt: str) -> str:
+    """Call local OpenAI-compatible server with a single user prompt."""
+    import httpx
+
+    url = LOCAL_LLM_BASE_URL.rstrip("/") + "/v1/chat/completions"
+    resp = httpx.post(
+        url,
+        json={
+            "model": LOCAL_LLM_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 64,
+            "temperature": 0.2,
+        },
+        timeout=30.0,
+    )
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
+
+
 def _call_local(context: str, query: str) -> str:
     """Call a local OpenAI-compatible server (LM Studio / Ollama) and return the answer."""
     import httpx

@@ -211,6 +211,44 @@ class TestListLocalModels:
         assert mock_get.call_args[0][0] == "http://localhost:1234/v1/models"
 
 
+class TestGenerateTitle:
+    """Tests for generate_title() — semantic title generation from text."""
+
+    def test_returns_string(self) -> None:
+        from pdf_rag.llm import generate_title
+
+        with patch("pdf_rag.llm._call_anthropic_raw", return_value="  Attention Mechanisms in NLP  "):
+            result = generate_title("some abstract text", backend="anthropic")
+        assert isinstance(result, str)
+
+    def test_strips_whitespace_and_quotes(self) -> None:
+        from pdf_rag.llm import generate_title
+
+        with patch("pdf_rag.llm._call_anthropic_raw", return_value='"Attention Mechanisms in NLP"'):
+            result = generate_title("some abstract text", backend="anthropic")
+        assert result == "Attention Mechanisms in NLP"
+
+    def test_uses_local_backend(self) -> None:
+        from pdf_rag.llm import generate_title
+
+        with patch("pdf_rag.llm._call_local_raw", return_value="Graph Neural Networks for Molecules") as mock:
+            result = generate_title("abstract here", backend="local")
+        mock.assert_called_once()
+        assert result == "Graph Neural Networks for Molecules"
+
+    def test_falls_back_to_file_stem_on_error(self) -> None:
+        from pdf_rag.llm import generate_title
+
+        with patch("pdf_rag.llm._call_anthropic_raw", side_effect=Exception("API down")):
+            result = generate_title("some text", backend="anthropic", fallback="my_paper")
+        assert result == "my_paper"
+
+    def test_empty_text_returns_fallback(self) -> None:
+        from pdf_rag.llm import generate_title
+
+        result = generate_title("", backend="anthropic", fallback="untitled")
+        assert result == "untitled"
+
     def test_call_local_empty_context(self) -> None:
         from pdf_rag.llm import _call_local
 

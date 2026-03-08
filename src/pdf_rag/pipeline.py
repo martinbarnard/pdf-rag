@@ -17,6 +17,7 @@ from pdf_rag.graph.store import GraphStore
 from pdf_rag.ingestion.chunker import chunk_document
 from pdf_rag.ingestion.embedder import Embedder
 from pdf_rag.ingestion.parser import parse_document
+from pdf_rag.llm import generate_title
 
 
 @dataclass
@@ -90,9 +91,13 @@ def ingest_document(
     store = GraphStore(db_path)
     paper_id = _paper_id(file_path)
 
+    title = doc.title or generate_title(
+        doc.abstract or " ".join(s["text"] for s in doc.sections[:2]),
+        fallback=file_path.stem,
+    )
     store.add_paper(
         id=paper_id,
-        title=doc.title or file_path.stem,
+        title=title,
         abstract=doc.abstract,
         year=doc.year or 0,
         doi=doc.doi or "",
