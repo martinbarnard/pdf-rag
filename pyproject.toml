@@ -5,19 +5,20 @@ build-backend = "hatchling.build"
 [project]
 name = "pdf-rag"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<4.0"
 dependencies = [
-    "docling",
-    "sentence-transformers",
-    "kuzu",
-    "gliner",
-    "rapidfuzz",
-    "typer",
-    "anthropic",
-    "rich",
-    "fastapi",
-    "uvicorn[standard]",
-    "python-multipart",
+  "docling",
+  "sentence-transformers",
+  "kuzu",
+  "gliner",
+  "rapidfuzz",
+  "typer",
+  "anthropic",
+  "httpx",
+  "rich",
+  "fastapi",
+  "uvicorn[standard]",
+  "python-multipart",
 ]
 
 [project.scripts]
@@ -28,12 +29,7 @@ pdf-rag-serve = "pdf_rag.server.main:serve"
 packages = ["src/pdf_rag"]
 
 [dependency-groups]
-dev = [
-    "pytest",
-    "pytest-cov",
-    "pytest-asyncio",
-    "httpx",
-]
+dev = ["pytest", "pytest-cov", "pytest-asyncio"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

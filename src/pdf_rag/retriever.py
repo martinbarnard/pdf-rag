@@ -1,4 +1,4 @@
-"""RAG retrieval pipeline: embed query → vector search → graph expand → Claude answer."""
+"""RAG retrieval pipeline: embed query → vector search → graph expand → LLM answer."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from pathlib import Path
 from pdf_rag.config import DEFAULT_DB_PATH
 from pdf_rag.graph.store import GraphStore
 from pdf_rag.ingestion.embedder import Embedder
+from pdf_rag.llm import call_llm
 
 
 @dataclass
@@ -53,7 +54,7 @@ def retrieve(
     chunks = store.search_similar_chunks(query_embedding, top_k=top_k)
 
     if not chunks:
-        return RetrievalResult(chunks=[], context="", answer=_call_claude("", query), sources=[])
+        return RetrievalResult(chunks=[], context="", answer=call_llm("", query), sources=[])
 
     # 3. Graph context expansion
     context_parts: list[str] = []
@@ -123,33 +124,7 @@ def retrieve(
 
     context = "\n\n".join(context_parts)
 
-    # 4 + 5. Assemble prompt and call Claude
-    answer = _call_claude(context, query)
+    # 4 + 5. Assemble prompt and call LLM
+    answer = call_llm(context, query)
 
     return RetrievalResult(chunks=chunks, context=context, answer=answer, sources=sources)
-
-
-def _call_claude(context: str, query: str) -> str:
-    """Call Claude via the Anthropic SDK and return the answer text."""
-    import anthropic
-
-    client = anthropic.Anthropic()
-
-    if context:
-        system = (
-            "You are a research assistant. Answer the user's question using only "
-            "the provided context from scientific papers. Cite sources where possible. "
-            "If the context does not contain enough information, say so clearly."
-        )
-        user_message = f"Context:\n{context}\n\nQuestion: {query}"
-    else:
-        system = "You are a research assistant."
-        user_message = f"Question: {query}\n\n(No relevant documents found in the database.)"
-
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        system=system,
-        messages=[{"role": "user", "content": user_message}],
-    )
-    return message.content[0].text

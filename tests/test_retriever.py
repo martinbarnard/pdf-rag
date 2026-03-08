@@ -53,38 +53,38 @@ class TestRetrievalResult:
 class TestRetrieve:
     def test_returns_retrieval_result(self, populated_store) -> None:
         store, db_path = populated_store
-        with patch("pdf_rag.retriever._call_claude", return_value="Mocked answer."):
+        with patch("pdf_rag.retriever.call_llm", return_value="Mocked answer."):
             result = retrieve("what is a transformer?", db_path=db_path)
         assert isinstance(result, RetrievalResult)
 
     def test_chunks_returned(self, populated_store) -> None:
         store, db_path = populated_store
-        with patch("pdf_rag.retriever._call_claude", return_value="Mocked answer."):
+        with patch("pdf_rag.retriever.call_llm", return_value="Mocked answer."):
             result = retrieve("transformer attention", db_path=db_path, top_k=2)
         assert len(result.chunks) <= 2
         assert all("text" in c for c in result.chunks)
 
     def test_answer_is_string(self, populated_store) -> None:
         store, db_path = populated_store
-        with patch("pdf_rag.retriever._call_claude", return_value="Test answer."):
+        with patch("pdf_rag.retriever.call_llm", return_value="Test answer."):
             result = retrieve("transformers", db_path=db_path)
         assert isinstance(result.answer, str)
 
     def test_context_includes_chunk_text(self, populated_store) -> None:
         store, db_path = populated_store
-        with patch("pdf_rag.retriever._call_claude", return_value="ok"):
+        with patch("pdf_rag.retriever.call_llm", return_value="ok"):
             result = retrieve("transformers", db_path=db_path, top_k=1)
         assert any(c["text"] in result.context for c in result.chunks)
 
     def test_empty_db_returns_no_chunks(self, tmp_path) -> None:
         from pdf_rag.graph.store import GraphStore
         GraphStore(tmp_path / "empty.db")
-        with patch("pdf_rag.retriever._call_claude", return_value="No results."):
+        with patch("pdf_rag.retriever.call_llm", return_value="No results."):
             result = retrieve("anything", db_path=tmp_path / "empty.db")
         assert result.chunks == []
 
     def test_top_k_respected(self, populated_store) -> None:
         store, db_path = populated_store
-        with patch("pdf_rag.retriever._call_claude", return_value="ok"):
+        with patch("pdf_rag.retriever.call_llm", return_value="ok"):
             result = retrieve("transformers", db_path=db_path, top_k=1)
         assert len(result.chunks) <= 1

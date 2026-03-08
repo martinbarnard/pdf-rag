@@ -24,6 +24,11 @@ CHUNK_OVERLAP: int = 64
 # all-MiniLM-L6-v2: 384, Qwen3-Embedding-0.6B: 1024
 EMBEDDING_DIM: int = 1024
 
+# LLM backend — "anthropic" (default) or "local" (Ollama / LM Studio / any OpenAI-compatible server)
+LLM_BACKEND: str = "anthropic"          # override with LLM_BACKEND env var (not auto-read here; set in llm.py)
+LOCAL_LLM_BASE_URL: str = "http://localhost:1234"   # LM Studio default
+LOCAL_LLM_MODEL: str = "qwen2.5-7b-instruct"        # model tag as shown in LM Studio
+
 # Device placement for ML models.
 # GLiNER defaults to CPU to avoid competing with the embedding model for VRAM.
 # Set EMBEDDING_DEVICE="cpu" if GPU memory is too constrained for the embedding model.
