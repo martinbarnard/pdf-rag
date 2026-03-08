@@ -51,6 +51,16 @@ class TestAddPaper:
         assert row[0] == 0
         assert row[1] == ""
 
+    def test_add_paper_stores_arxiv_id(self, tmp_db: GraphStore) -> None:
+        tmp_db.add_paper(id="p4", title="TinyLlama", arxiv_id="2401.02385")
+        result = tmp_db.execute("MATCH (p:Paper {id: 'p4'}) RETURN p.arxiv_id")
+        assert result.get_next()[0] == "2401.02385"
+
+    def test_add_paper_arxiv_id_defaults_empty(self, tmp_db: GraphStore) -> None:
+        tmp_db.add_paper(id="p5", title="No arXiv")
+        result = tmp_db.execute("MATCH (p:Paper {id: 'p5'}) RETURN p.arxiv_id")
+        assert result.get_next()[0] == ""
+
 
 class TestAddAuthor:
     def test_add_author_can_be_queried_back(self, tmp_db: GraphStore) -> None:

@@ -58,6 +58,7 @@ class PreparedDocument:
     abstract: str
     year: int
     doi: str
+    arxiv_id: str
     authors: list[dict]           # [{"canonical_name": str}]
     topics: list[dict]            # [{"canonical_name": str}]
     chunks: list[_PreparedChunk]
@@ -118,6 +119,7 @@ def prepare_document(
         abstract=doc.abstract,
         year=doc.year or 0,
         doi=doc.doi or "",
+        arxiv_id=doc.arxiv_id or "",
         authors=authors,
         topics=topics,
         chunks=prepared_chunks,
@@ -143,6 +145,7 @@ def store_prepared(prepared: PreparedDocument, store: GraphStore) -> IngestResul
         abstract=prepared.abstract,
         year=prepared.year,
         doi=prepared.doi,
+        arxiv_id=prepared.arxiv_id,
         file_path=str(prepared.file_path),
     )
 

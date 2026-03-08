@@ -24,6 +24,7 @@ _NODE_TABLES: list[str] = [
         abstract    STRING,
         year        INT64,
         doi         STRING,
+        arxiv_id    STRING,
         file_path   STRING,
         summary     STRING,
         PRIMARY KEY (id)
@@ -119,6 +120,9 @@ EXPECTED_EDGE_TABLES: list[str] = [
 def create_schema(conn: kuzu.Connection) -> None:
     """Create all node and edge tables if they do not already exist.
 
+    Also runs lightweight migrations (ALTER TABLE ADD COLUMN) for columns
+    added after the initial schema so existing databases are upgraded in place.
+
     Args:
         conn: An open kuzu.Connection to the target database.
     """
@@ -126,3 +130,19 @@ def create_schema(conn: kuzu.Connection) -> None:
         conn.execute(ddl)
     for ddl in _EDGE_TABLES:
         conn.execute(ddl)
+    _migrate(conn)
+
+
+def _migrate(conn: kuzu.Connection) -> None:
+    """Apply additive migrations to existing databases."""
+    _add_column_if_missing(conn, "Paper", "arxiv_id", 'STRING DEFAULT ""')
+
+
+def _add_column_if_missing(
+    conn: kuzu.Connection, table: str, column: str, col_type: str
+) -> None:
+    """Add a column to a node table if it doesn't already exist."""
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD {column} {col_type}")
+    except Exception:
+        pass  # column already exists — kuzu raises on duplicate ADD

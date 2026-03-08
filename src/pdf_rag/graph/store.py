@@ -31,6 +31,7 @@ class GraphStore:
         abstract: str = "",
         year: int = 0,
         doi: str = "",
+        arxiv_id: str = "",
         file_path: str = "",
         summary: str = "",
     ) -> None:
@@ -40,10 +41,12 @@ class GraphStore:
             MERGE (p:Paper {id: $id})
             ON CREATE SET p.title = $title, p.abstract = $abstract,
                           p.year = $year, p.doi = $doi,
+                          p.arxiv_id = $arxiv_id,
                           p.file_path = $file_path, p.summary = $summary
             """,
             {"id": id, "title": title, "abstract": abstract,
-             "year": year, "doi": doi, "file_path": file_path, "summary": summary},
+             "year": year, "doi": doi, "arxiv_id": arxiv_id,
+             "file_path": file_path, "summary": summary},
         )
 
     def add_author(

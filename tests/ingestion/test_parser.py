@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from pdf_rag.ingestion.parser import ParsedDocument, parse_document
+from pdf_rag.ingestion.parser import ParsedDocument, _extract_arxiv_id, parse_document
 
 
 class TestParsedDocument:
@@ -38,6 +38,31 @@ class TestParsedDocument:
         )
         assert doc.year is None
         assert doc.doi is None
+        assert doc.arxiv_id is None
+
+
+class TestExtractArxivId:
+    def test_detects_numeric_filename(self) -> None:
+        assert _extract_arxiv_id(Path("2301.04567.pdf"), "") == "2301.04567"
+
+    def test_strips_version_suffix_from_filename(self) -> None:
+        assert _extract_arxiv_id(Path("2301.04567v2.pdf"), "") == "2301.04567"
+
+    def test_non_arxiv_filename_falls_back_to_text(self) -> None:
+        text = "arXiv:2401.00001 — TinyLlama paper"
+        assert _extract_arxiv_id(Path("tinyllama.pdf"), text) == "2401.00001"
+
+    def test_text_match_case_insensitive(self) -> None:
+        text = "ARXIV: 2312.99999 is the reference"
+        assert _extract_arxiv_id(Path("paper.pdf"), text) == "2312.99999"
+
+    def test_no_arxiv_returns_none(self) -> None:
+        assert _extract_arxiv_id(Path("paper.pdf"), "no arxiv here") is None
+
+    def test_filename_takes_priority_over_text(self) -> None:
+        # filename wins even if text mentions a different ID
+        result = _extract_arxiv_id(Path("2301.04567.pdf"), "arXiv:9999.99999")
+        assert result == "2301.04567"
 
 
 class TestParseDocument:
