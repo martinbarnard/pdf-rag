@@ -24,12 +24,23 @@ _db_lock = threading.Lock()
 
 
 def _get_database(db_path: Path) -> kuzu.Database:
-    """Return the shared kuzu.Database for the given path, creating it if needed."""
+    """Return the shared kuzu.Database for the given path, creating it if needed.
+
+    If the initial open fails (e.g. stale WAL from a previous crash), the WAL
+    file is removed and the open is retried once with a clean slate.
+    """
     key = str(db_path.resolve())
     with _db_lock:
         if key not in _db_instances:
             db_path.parent.mkdir(parents=True, exist_ok=True)
-            _db_instances[key] = kuzu.Database(str(db_path))
+            try:
+                _db_instances[key] = kuzu.Database(str(db_path))
+            except (IndexError, RuntimeError):
+                # Stale WAL / corrupted metadata — remove WAL and retry.
+                wal = db_path.with_suffix(db_path.suffix + ".wal")
+                if wal.exists():
+                    wal.unlink()
+                _db_instances[key] = kuzu.Database(str(db_path))
         return _db_instances[key]
 
 
