@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
 import { Network, BookOpen, Tag, Upload, Search } from 'lucide-react'
 import { useApi } from './hooks/useApi'
+import { IngestProvider, useIngest } from './context/IngestContext'
 import GraphExplorer from './pages/GraphExplorer'
 import PaperBrowser from './pages/PaperBrowser'
 import TopicMap from './pages/TopicMap'
@@ -21,6 +22,7 @@ interface Stats { papers: number; authors: number; topics: number; chunks: numbe
 
 function Sidebar() {
   const { data: stats } = useApi<Stats>('/api/stats')
+  const { activeCount } = useIngest()
 
   return (
     <nav className="flex flex-col w-48 shrink-0 bg-gray-900 border-r border-gray-800">
@@ -43,7 +45,12 @@ function Sidebar() {
             }
           >
             <Icon size={15} />
-            {label}
+            <span className="flex-1">{label}</span>
+            {label === 'Ingest' && activeCount > 0 && (
+              <span className="ml-auto bg-indigo-500 text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                {activeCount}
+              </span>
+            )}
           </NavLink>
         ))}
       </div>
@@ -71,6 +78,7 @@ function Sidebar() {
 export default function App() {
   return (
     <BrowserRouter basename="/app">
+      <IngestProvider>
       <div className="flex h-screen bg-gray-950 text-gray-100 overflow-hidden">
         <Sidebar />
         <main className="flex-1 overflow-hidden">
@@ -86,6 +94,7 @@ export default function App() {
           </Routes>
         </main>
       </div>
+      </IngestProvider>
     </BrowserRouter>
   )
 }
