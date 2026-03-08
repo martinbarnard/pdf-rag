@@ -35,6 +35,10 @@ LOCAL_LLM_PROBE_TIMEOUT: float = 3.0                 # seconds to wait when prob
 
 # Device placement for ML models.
 # GLiNER defaults to CPU to avoid competing with the embedding model for VRAM.
-# Set EMBEDDING_DEVICE="cpu" if GPU memory is too constrained for the embedding model.
-EMBEDDING_DEVICE: str = "cuda"   # "cuda" or "cpu"
-GLINER_DEVICE: str = "cpu"       # "cuda" or "cpu"
+# EMBEDDING_DEVICE_WITH_LOCAL_LLM: when a local LLM server (LM Studio/Ollama) is
+# active it already occupies most VRAM; switch the embedder to CPU to avoid OOM.
+# Set EMBEDDING_DEVICE="cuda" and EMBEDDING_DEVICE_WITH_LOCAL_LLM="cuda" only if
+# you have >16 GB VRAM and want maximum throughput.
+EMBEDDING_DEVICE: str = "cuda"              # used when no local LLM is running
+EMBEDDING_DEVICE_WITH_LOCAL_LLM: str = "cpu"  # used when local LLM server is reachable
+GLINER_DEVICE: str = "cpu"                  # always CPU to avoid OOM during ingest
