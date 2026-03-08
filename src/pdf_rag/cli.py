@@ -68,10 +68,35 @@ def ingest(
 def search(
     query: str = typer.Argument(..., help="Natural-language search query."),
     db: Path = typer.Option(None, "--db", help="Path to the kuzu database directory."),
-    top_k: int = typer.Option(5, "--top-k", help="Number of results to return."),
+    top_k: int = typer.Option(5, "--top-k", help="Number of chunks to retrieve."),
 ) -> None:
-    """Search the graph database with a natural-language query."""
-    raise NotImplementedError("search is not yet implemented")
+    """Search the graph database and answer using retrieved context."""
+    from pdf_rag.config import DEFAULT_DB_PATH
+    from pdf_rag.retriever import retrieve
+
+    db_path = db or DEFAULT_DB_PATH
+    if not Path(db_path).exists():
+        console.print(f"[red]Database not found:[/red] {db_path}")
+        raise typer.Exit(1)
+
+    with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
+        t = progress.add_task("Searching...", total=None)
+        result = retrieve(query, db_path=db_path, top_k=top_k)
+        progress.remove_task(t)
+
+    if result.chunks:
+        console.print("\n[bold cyan]Retrieved chunks:[/bold cyan]")
+        for i, chunk in enumerate(result.chunks, 1):
+            console.print(
+                f"  [dim]{i}.[/dim] [{chunk['section']}] "
+                f"[dim](score: {chunk['score']:.3f})[/dim]\n"
+                f"     {chunk['text'][:120]}..."
+            )
+
+    if result.sources:
+        console.print("\n[bold]Sources:[/bold] " + " · ".join(result.sources))
+
+    console.print(f"\n[bold green]Answer:[/bold green]\n{result.answer}")
 
 
 @app.command()
