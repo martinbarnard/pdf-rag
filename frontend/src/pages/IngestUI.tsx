@@ -78,8 +78,10 @@ function JobRow({ job }: { job: IngestJob }) {
         {job.status === 'error' && (
           <p className="text-xs text-red-400 mt-0.5 truncate" title={job.error}>{job.error}</p>
         )}
-        {(job.status === 'queued' || job.status === 'running') && (
-          <p className="text-xs text-gray-600 mt-0.5">{job.status === 'queued' ? 'Waiting…' : 'Processing…'}</p>
+        {(job.status === 'queued' || job.status === 'preparing' || job.status === 'storing') && (
+          <p className="text-xs text-gray-600 mt-0.5">
+            {job.status === 'queued' ? 'Waiting…' : job.status === 'preparing' ? 'Parsing & embedding…' : 'Writing to graph…'}
+          </p>
         )}
       </div>
       <span className={`text-xs font-medium shrink-0 ${statusColour(job.status)}`}>
@@ -90,17 +92,18 @@ function JobRow({ job }: { job: IngestJob }) {
 }
 
 function StatusIcon({ status }: { status: IngestJob['status'] }) {
-  if (status === 'done')    return <CheckCircle size={16} className="text-green-400 shrink-0" />
-  if (status === 'error')   return <XCircle size={16} className="text-red-400 shrink-0" />
-  if (status === 'running') return <Loader size={16} className="text-indigo-400 animate-spin shrink-0" />
+  if (status === 'done')                                  return <CheckCircle size={16} className="text-green-400 shrink-0" />
+  if (status === 'error')                                 return <XCircle size={16} className="text-red-400 shrink-0" />
+  if (status === 'preparing' || status === 'storing')     return <Loader size={16} className="text-indigo-400 animate-spin shrink-0" />
   return <Clock size={16} className="text-gray-600 shrink-0" />
 }
 
 function statusColour(status: IngestJob['status']) {
-  return {
-    queued:  'text-gray-500',
-    running: 'text-indigo-400',
-    done:    'text-green-400',
-    error:   'text-red-400',
-  }[status]
+  return ({
+    queued:    'text-gray-500',
+    preparing: 'text-indigo-400',
+    storing:   'text-amber-400',
+    done:      'text-green-400',
+    error:     'text-red-400',
+  } as Record<string, string>)[status] ?? 'text-gray-500'
 }

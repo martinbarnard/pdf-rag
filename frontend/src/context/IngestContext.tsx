@@ -9,7 +9,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 export interface IngestJob {
   id: string
   filename: string
-  status: 'queued' | 'running' | 'done' | 'error'
+  status: 'queued' | 'preparing' | 'storing' | 'done' | 'error'
   paper_id?: string
   chunk_count?: number
   entity_count?: number
@@ -32,7 +32,7 @@ export function IngestProvider({ children }: { children: React.ReactNode }) {
   const [jobs, setJobs] = useState<IngestJob[]>([])
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const hasActive = jobs.some(j => j.status === 'queued' || j.status === 'running')
+  const hasActive = jobs.some(j => j.status === 'queued' || j.status === 'preparing' || j.status === 'storing')
 
   // Merge server jobs into local state (preserves order of local additions)
   const mergeJobs = useCallback((serverJobs: IngestJob[]) => {
@@ -106,10 +106,10 @@ export function IngestProvider({ children }: { children: React.ReactNode }) {
     try {
       await fetch('/api/ingest/jobs', { method: 'DELETE' })
     } catch { /* best-effort */ }
-    setJobs(prev => prev.filter(j => j.status === 'queued' || j.status === 'running'))
+    setJobs(prev => prev.filter(j => j.status === 'queued' || j.status === 'preparing' || j.status === 'storing'))
   }, [])
 
-  const activeCount = jobs.filter(j => j.status === 'queued' || j.status === 'running').length
+  const activeCount = jobs.filter(j => j.status === 'queued' || j.status === 'preparing' || j.status === 'storing').length
 
   return (
     <IngestContext.Provider value={{ jobs, submit, clearFinished, activeCount }}>
