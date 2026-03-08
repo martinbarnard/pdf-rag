@@ -16,22 +16,43 @@ ENTITY_TYPES: list[str] = [
 
 
 class EntityExtractor:
-    """Wraps a GLiNER model for named-entity recognition over chunk text."""
+    """Wraps a GLiNER model for named-entity recognition. Lazy-loads the model."""
 
     def __init__(self, model_name: str = DEFAULT_GLINER_MODEL) -> None:
         self.model_name = model_name
-        self._model = None  # lazy-loaded
+        self._model = None
 
     def _load(self) -> None:
-        raise NotImplementedError
+        from gliner import GLiNER
+        self._model = GLiNER.from_pretrained(self.model_name)
 
-    def extract(self, text: str) -> list[dict]:
+    def extract(
+        self,
+        text: str,
+        labels: list[str] | None = None,
+    ) -> list[dict]:
         """Extract entities from a text string.
 
         Args:
             text: The input text to process.
+            labels: Entity type labels to detect. Defaults to ENTITY_TYPES.
 
         Returns:
-            A list of entity dicts with keys: text, label, start, end, score.
+            List of dicts with keys: text, label, start, end, score.
         """
-        raise NotImplementedError
+        if not text:
+            return []
+        if self._model is None:
+            self._load()
+        active_labels = labels if labels is not None else ENTITY_TYPES
+        entities = self._model.predict_entities(text, active_labels)
+        return [
+            {
+                "text": e["text"],
+                "label": e["label"],
+                "start": e["start"],
+                "end": e["end"],
+                "score": float(e["score"]),
+            }
+            for e in entities
+        ]

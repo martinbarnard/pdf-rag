@@ -8,14 +8,19 @@ import kuzu
 import pytest
 
 from pdf_rag.graph.schema import create_schema
+from pdf_rag.graph.store import GraphStore
 
 
 @pytest.fixture()
-def tmp_db(tmp_path: Path) -> kuzu.Connection:
-    """Return an open kuzu.Connection backed by a fresh temporary database."""
-    # kuzu creates its own storage files; pass a path that does not yet exist
-    # as a directory.
-    db_path = tmp_path / "test_graph.db"
+def tmp_db(tmp_path: Path) -> GraphStore:
+    """Return a GraphStore backed by a fresh temporary database."""
+    return GraphStore(tmp_path / "test_graph.db")
+
+
+@pytest.fixture()
+def tmp_conn(tmp_path: Path) -> kuzu.Connection:
+    """Return a raw kuzu.Connection for schema-level tests."""
+    db_path = tmp_path / "schema_test.db"
     db = kuzu.Database(str(db_path))
     conn = kuzu.Connection(db)
     create_schema(conn)

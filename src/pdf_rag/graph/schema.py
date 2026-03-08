@@ -65,10 +65,11 @@ _NODE_TABLES: list[str] = [
     """,
     """
     CREATE NODE TABLE IF NOT EXISTS Chunk (
-        id      STRING,
-        text    STRING,
-        page    INT64,
-        section STRING,
+        id        STRING,
+        text      STRING,
+        page      INT64,
+        section   STRING,
+        embedding FLOAT[],
         PRIMARY KEY (id)
     )
     """,
