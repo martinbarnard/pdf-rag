@@ -116,7 +116,7 @@ uv run pdf-rag-serve
 uv run pdf-rag-serve --host 0.0.0.0 --port 8000
 ```
 
-Open **http://localhost:8000/app** in your browser.
+Open **http://localhost:8000** in your browser (redirects automatically to `/app/`).
 
 ### Pages
 

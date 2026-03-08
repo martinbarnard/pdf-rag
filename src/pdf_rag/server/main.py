@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 # Path where the built React frontend will live
@@ -38,6 +39,15 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Convenience redirects
+    @app.get("/", include_in_schema=False)
+    async def root() -> RedirectResponse:
+        return RedirectResponse(url="/app/")
+
+    @app.get("/app", include_in_schema=False)
+    async def app_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/app/")
 
     # Health check
     @app.get("/health", tags=["meta"])
