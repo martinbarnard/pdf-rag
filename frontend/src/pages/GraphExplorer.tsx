@@ -96,13 +96,21 @@ export default function GraphExplorer() {
 
   const addGhostResults = useCallback((results: ArxivResult[]) => {
     const cy = cyRef.current
+
+    // Always populate the map regardless of whether the graph is ready —
+    // the tap handler reads from the map, so we must populate it even if
+    // we can't add nodes to the canvas yet.
+    for (const r of results) {
+      ghostResultsRef.current.set(ghostPaperId(r.arxiv_id), r)
+    }
+
     if (!cy) return
 
     const toAdd: cytoscape.ElementDefinition[] = []
 
     for (const r of results) {
       const paperId = ghostPaperId(r.arxiv_id)
-      ghostResultsRef.current.set(paperId, r)
+      // map already set above
 
       if (!cy.getElementById(paperId).length) {
         toAdd.push({ data: { id: paperId, label: r.title, type: 'GhostPaper' } })
@@ -408,40 +416,40 @@ export default function GraphExplorer() {
             </div>
 
             {/* Ghost paper: show abstract, authors, ingest button */}
-            {selected.type === 'GhostPaper' && (
-              ghostDetail ? (
+            {selected.type === 'GhostPaper' && (() => {
+              // Read from ref directly at render time — covers the race where the
+              // tap handler fired before addGhostResults populated the map.
+              const d = ghostDetail ?? ghostResultsRef.current.get(selected.id) ?? null
+              if (!d) return <p className="text-xs text-gray-500 italic text-center">Detail unavailable</p>
+              const state = ingestState[d.arxiv_id] ?? 'idle'
+              return (
                 <>
-                  <p className="text-xs text-gray-400 leading-relaxed line-clamp-4">{ghostDetail.abstract}</p>
+                  <p className="text-xs text-gray-400 leading-relaxed line-clamp-4">{d.abstract}</p>
                   <div className="text-xs text-gray-500 space-y-0.5">
-                    <p>{ghostDetail.authors.slice(0, 3).join(', ')}{ghostDetail.authors.length > 3 ? ' et al.' : ''}</p>
-                    <p>{ghostDetail.published.slice(0, 4)} · {ghostDetail.categories.slice(0, 2).join(', ')}</p>
+                    <p>{d.authors.slice(0, 3).join(', ')}{d.authors.length > 3 ? ' et al.' : ''}</p>
+                    <p>{d.published.slice(0, 4)} · {d.categories.slice(0, 2).join(', ')}</p>
                   </div>
-                  {(() => {
-                    const state = ingestState[ghostDetail.arxiv_id] ?? 'idle'
-                    return state === 'done' ? (
-                      <p className="text-xs text-green-400 text-center">Ingested ✓</p>
-                    ) : state === 'error' ? (
-                      <p className="text-xs text-red-400 text-center">Ingest failed</p>
-                    ) : (
-                      <button
-                        onClick={() => ingestGhost(ghostDetail.arxiv_id)}
-                        disabled={state === 'ingesting'}
-                        className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-sm text-white transition-colors">
-                        {state === 'ingesting'
-                          ? <><RefreshCw size={13} className="animate-spin" /> Ingesting…</>
-                          : <><Download size={13} /> Ingest paper</>}
-                      </button>
-                    )
-                  })()}
-                  <a href={ghostDetail.pdf_url} target="_blank" rel="noreferrer"
+                  {state === 'done' ? (
+                    <p className="text-xs text-green-400 text-center">Ingested ✓</p>
+                  ) : state === 'error' ? (
+                    <p className="text-xs text-red-400 text-center">Ingest failed</p>
+                  ) : (
+                    <button
+                      onClick={() => ingestGhost(d.arxiv_id)}
+                      disabled={state === 'ingesting'}
+                      className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-sm text-white transition-colors">
+                      {state === 'ingesting'
+                        ? <><RefreshCw size={13} className="animate-spin" /> Ingesting…</>
+                        : <><Download size={13} /> Ingest paper</>}
+                    </button>
+                  )}
+                  <a href={d.pdf_url} target="_blank" rel="noreferrer"
                     className="flex items-center justify-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
                     <ExternalLink size={11} /> View on arXiv
                   </a>
                 </>
-              ) : (
-                <p className="text-xs text-gray-500 italic text-center">Detail unavailable</p>
               )
-            )}
+            })()}
 
             {/* Ghost author/topic: just a label */}
             {isGhost && selected.type !== 'GhostPaper' && (
