@@ -38,6 +38,13 @@ const ICON_TOPIC = svgUri(
   '<line x1="7" y1="7" x2="7.01" y2="7"/>'
 )
 
+// Cloud download — ghost/unpopulated arXiv paper
+const ICON_GHOST = svgUri(
+  '<polyline points="8 17 12 21 16 17"/>' +
+  '<line x1="12" y1="12" x2="12" y2="21"/>' +
+  '<path d="M20.88 18.09A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.29"/>'
+)
+
 // ---------------------------------------------------------------------------
 // Node sizes per type
 // ---------------------------------------------------------------------------
@@ -111,6 +118,62 @@ export function buildStylesheet(opts?: {
         'background-color': '#d97706',
         'background-image': ICON_TOPIC,
       } as cytoscape.Css.Node,
+    },
+
+    // Ghost Paper — dashed border, muted indigo, cloud-download icon
+    {
+      selector: 'node[type="GhostPaper"]',
+      style: {
+        width: SIZE.Paper,
+        height: SIZE.Paper,
+        'background-color': '#312e81',
+        'background-image': ICON_GHOST,
+        'border-width': 2,
+        'border-style': 'dashed',
+        'border-color': '#818cf8',
+        opacity: 0.75,
+      } as cytoscape.Css.Node,
+    },
+
+    // Ghost Author — dashed, muted green
+    {
+      selector: 'node[type="GhostAuthor"]',
+      style: {
+        width: SIZE.Author,
+        height: SIZE.Author,
+        'background-color': '#14532d',
+        'background-image': ICON_AUTHOR,
+        'border-width': 2,
+        'border-style': 'dashed',
+        'border-color': '#4ade80',
+        opacity: 0.75,
+      } as cytoscape.Css.Node,
+    },
+
+    // Ghost Topic — dashed, muted amber
+    {
+      selector: 'node[type="GhostTopic"]',
+      style: {
+        width: SIZE.Topic,
+        height: SIZE.Topic,
+        'background-color': '#78350f',
+        'background-image': ICON_TOPIC,
+        'border-width': 2,
+        'border-style': 'dashed',
+        'border-color': '#fbbf24',
+        opacity: 0.75,
+      } as cytoscape.Css.Node,
+    },
+
+    // Ghost edges — dimmer
+    {
+      selector: 'edge[ghost="true"]',
+      style: {
+        'line-color': '#374151',
+        'target-arrow-color': '#374151',
+        'line-style': 'dashed',
+        opacity: 0.5,
+      },
     },
 
     // Selected highlight
