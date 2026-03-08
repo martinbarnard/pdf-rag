@@ -130,15 +130,36 @@ def _call_anthropic(context: str, query: str) -> str:
     return message.content[0].text
 
 
-_TITLE_SYSTEM = (
-    "You output only the requested text — nothing else. "
-    "No preamble, no explanation, no punctuation around the answer."
+_TITLE_PROMPT = "Title (10 words max) for this text:\n\n{excerpt}"
+
+# Patterns that indicate a line is model narration, not the title itself
+import re as _re
+_JUNK_LINE = _re.compile(
+    r"^(thinking|constraint|step|note|output|title|here|sure|okay|certainly|"
+    r"the title|a title|:\s*$|\*|\d+\.)",
+    _re.IGNORECASE,
 )
 
-_TITLE_PROMPT = (
-    "Write a concise title (10 words or fewer) for this academic excerpt. "
-    "Output the title only.\n\nExcerpt:\n{excerpt}"
-)
+
+def _extract_title(raw: str, fallback: str) -> str:
+    """Extract a clean title from a model response that may contain narration.
+
+    Strips <think> blocks, then returns the last line that doesn't look like
+    model self-narration (constraint lists, preamble, bullet points, etc.).
+    Falls back to the last non-empty line if all lines look like junk.
+    """
+    cleaned = _strip_thinking(raw)
+    lines = [
+        l.strip().strip("*").strip("-").strip('"').strip("'").strip()
+        for l in cleaned.splitlines()
+        if l.strip()
+    ]
+    # Prefer the last line that doesn't match known junk patterns
+    candidates = [l for l in lines if l and not _JUNK_LINE.search(l)]
+    if candidates:
+        return candidates[-1]
+    # Last resort: last non-empty line
+    return lines[-1] if lines else fallback
 
 
 def generate_title(text: str, backend: str | None = None, fallback: str = "Untitled") -> str:
@@ -161,18 +182,16 @@ def generate_title(text: str, backend: str | None = None, fallback: str = "Untit
         if resolved == "anthropic":
             raw = _call_anthropic_raw(prompt)
         elif resolved == "local":
-            raw = _call_local_raw(prompt, system=_TITLE_SYSTEM)
+            raw = _call_local_raw(prompt)
         else:  # auto
             if probe_local():
                 try:
-                    raw = _call_local_raw(prompt, system=_TITLE_SYSTEM)
+                    raw = _call_local_raw(prompt)
                 except Exception:
                     raw = _call_anthropic_raw(prompt)
             else:
                 raw = _call_anthropic_raw(prompt)
-        # Some models narrate before answering — take the last non-empty line
-        lines = [l.strip().strip('"').strip("'") for l in raw.splitlines() if l.strip()]
-        return lines[-1] if lines else fallback
+        return _extract_title(raw, fallback)
     except Exception:
         return fallback
 
