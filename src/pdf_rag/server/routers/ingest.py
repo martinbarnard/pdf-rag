@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import tempfile
+import shutil
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -26,6 +26,7 @@ JobStatus = Literal["queued", "running", "done", "error"]
 class IngestJob:
     id: str
     filename: str
+    dest_path: str
     status: JobStatus = "queued"
     paper_id: str | None = None
     chunk_count: int | None = None
@@ -37,6 +38,7 @@ class IngestJob:
         return {
             "id": self.id,
             "filename": self.filename,
+            "dest_path": self.dest_path,
             "status": self.status,
             "paper_id": self.paper_id,
             "chunk_count": self.chunk_count,
@@ -61,7 +63,22 @@ def _all_jobs() -> list[dict]:
         return [j.to_dict() for j in reversed(list(_jobs.values()))]
 
 
-def _run_job(job_id: str, tmp_path: Path, db_path: Path) -> None:
+def _unique_dest(ingest_dir: Path, filename: str) -> Path:
+    """Return a non-colliding path inside ingest_dir for the given filename."""
+    dest = ingest_dir / filename
+    if not dest.exists():
+        return dest
+    stem = Path(filename).stem
+    suffix = Path(filename).suffix
+    counter = 1
+    while True:
+        candidate = ingest_dir / f"{stem}_{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def _run_job(job_id: str, dest_path: Path, db_path: Path) -> None:
     """Execute the ingest pipeline in a background thread."""
     with _lock:
         job = _jobs.get(job_id)
@@ -70,7 +87,7 @@ def _run_job(job_id: str, tmp_path: Path, db_path: Path) -> None:
 
     try:
         from pdf_rag.pipeline import ingest_document
-        result = ingest_document(tmp_path, db_path=db_path)
+        result = ingest_document(dest_path, db_path=db_path)
         with _lock:
             if job:
                 job.status = "done"
@@ -83,8 +100,7 @@ def _run_job(job_id: str, tmp_path: Path, db_path: Path) -> None:
             if job:
                 job.status = "error"
                 job.error = str(exc)
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    # Note: dest_path is NOT deleted — it is the permanent copy in ingest_dir.
 
 
 # ---------------------------------------------------------------------------
@@ -93,31 +109,34 @@ def _run_job(job_id: str, tmp_path: Path, db_path: Path) -> None:
 
 @router.post("/ingest")
 async def ingest_file(file: UploadFile, request: Request) -> dict:
-    """Upload a document and queue it for background ingestion.
+    """Upload a document, save it to the ingest folder, and queue for ingestion.
 
+    The file is copied to app.state.ingest_dir and stays there permanently.
     Returns a job_id immediately. Poll GET /api/ingest/jobs/{job_id} for status.
     """
-    suffix = Path(file.filename or "").suffix.lower()
+    filename = file.filename or "upload"
+    suffix = Path(filename).suffix.lower()
     if suffix not in _ALLOWED_SUFFIXES:
         raise HTTPException(status_code=415, detail=f"Unsupported file type: {suffix!r}")
 
+    ingest_dir: Path = request.app.state.ingest_dir
+    db_path: Path = request.app.state.db_path
+
     content = await file.read()
 
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(content)
-        tmp_path = Path(tmp.name)
+    dest_path = _unique_dest(ingest_dir, filename)
+    dest_path.write_bytes(content)
 
     job_id = uuid.uuid4().hex[:12]
-    job = IngestJob(id=job_id, filename=file.filename or tmp_path.name)
+    job = IngestJob(id=job_id, filename=filename, dest_path=str(dest_path))
 
     with _lock:
         _jobs[job_id] = job
 
-    db_path: Path = request.app.state.db_path
-    thread = threading.Thread(target=_run_job, args=(job_id, tmp_path, db_path), daemon=True)
+    thread = threading.Thread(target=_run_job, args=(job_id, dest_path, db_path), daemon=True)
     thread.start()
 
-    return {"job_id": job_id, "filename": job.filename, "status": "queued"}
+    return {"job_id": job_id, "filename": filename, "dest_path": str(dest_path), "status": "queued"}
 
 
 @router.get("/ingest/jobs")
@@ -137,7 +156,7 @@ async def get_job(job_id: str) -> dict:
 
 @router.delete("/ingest/jobs")
 async def clear_jobs() -> dict:
-    """Remove all completed/errored jobs from the list."""
+    """Remove all completed/errored jobs from the in-memory list."""
     with _lock:
         to_remove = [jid for jid, j in _jobs.items() if j.status in ("done", "error")]
         for jid in to_remove:

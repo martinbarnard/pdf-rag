@@ -5,6 +5,11 @@ from pathlib import Path
 # Storage
 DEFAULT_DB_PATH: Path = Path("~/.pdf_rag/graph.db").expanduser()
 
+# Destination folder for all ingested documents.
+# Files uploaded via the web UI or CLI are copied here so there is one
+# canonical location for all source documents.
+DEFAULT_INGEST_DIR: Path = Path("~/.pdf_rag/documents").expanduser()
+
 # Embedding model — placeholder: verify exact HF model name before use.
 # Qwen3-Embedding-0.6B may not yet be published; update to the confirmed
 # model ID once available (e.g. "Qwen/Qwen3-Embedding-0.6B").

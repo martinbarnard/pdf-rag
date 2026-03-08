@@ -1,5 +1,8 @@
 """Typer CLI entry point for pdf-rag."""
 
+from __future__ import annotations
+
+import shutil
 from pathlib import Path
 
 import typer
@@ -21,12 +24,14 @@ def ingest(
     db: Path = typer.Option(None, "--db", help="Path to the kuzu database directory."),
 ) -> None:
     """Ingest one or more documents into the graph database."""
-    from pdf_rag.config import DEFAULT_DB_PATH
+    from pdf_rag.config import DEFAULT_DB_PATH, DEFAULT_INGEST_DIR
     from pdf_rag.extraction.entities import EntityExtractor
     from pdf_rag.ingestion.embedder import Embedder
     from pdf_rag.pipeline import ingest_document
 
     db_path = db or DEFAULT_DB_PATH
+    ingest_dir = DEFAULT_INGEST_DIR
+    ingest_dir.mkdir(parents=True, exist_ok=True)
 
     # Collect files
     if path.is_dir():
@@ -39,6 +44,8 @@ def ingest(
         console.print("[yellow]No supported files found.[/yellow]")
         raise typer.Exit(1)
 
+    console.print(f"[dim]Documents folder:[/dim] [cyan]{ingest_dir}[/cyan]")
+
     # Load models once, reuse across files
     with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
         t = progress.add_task("Loading models...", total=None)
@@ -49,9 +56,27 @@ def ingest(
     total = len(files)
     success = 0
     for i, file in enumerate(files, 1):
+        # Copy to ingest_dir unless already inside it
+        try:
+            file.resolve().relative_to(ingest_dir.resolve())
+            ingest_path = file  # already inside ingest_dir
+        except ValueError:
+            dest = ingest_dir / file.name
+            if dest.exists() and dest.resolve() != file.resolve():
+                # avoid overwriting — suffix with counter
+                stem, suffix = file.stem, file.suffix
+                counter = 1
+                while dest.exists():
+                    dest = ingest_dir / f"{stem}_{counter}{suffix}"
+                    counter += 1
+            if not dest.exists():
+                shutil.copy2(file, dest)
+                console.print(f"  [dim]→ copied to {dest}[/dim]")
+            ingest_path = dest
+
         console.print(f"[dim]({i}/{total})[/dim] Ingesting [bold]{file.name}[/bold]...")
         try:
-            result = ingest_document(file, db_path=db_path, embedder=embedder, extractor=extractor)
+            result = ingest_document(ingest_path, db_path=db_path, embedder=embedder, extractor=extractor)
             console.print(
                 f"  [green]✓[/green] {result.chunk_count} chunks, "
                 f"{result.entity_count} entities, "
