@@ -96,19 +96,16 @@ class TestIngestDocument:
         )
         assert r.get_next()[0] == result.chunk_count
 
-    def test_uses_generated_title_when_no_docling_title(self, tmp_path, shared_embedder, shared_extractor) -> None:
-        """When docling can't extract a title, pipeline calls generate_title and stores that."""
+    def test_falls_back_to_filename_when_no_docling_title(self, tmp_path, shared_embedder, shared_extractor) -> None:
+        """When docling can't extract a title, pipeline uses section heading or filename stem."""
         md_file = tmp_path / "notitle.md"
         md_file.write_text("Some plain text without a heading or title marker.\n")
         db_path = tmp_path / "tnotitle.db"
-        with patch("pdf_rag.pipeline.generate_title", return_value="Generated Semantic Title") as mock_gt:
-            result = ingest_document(md_file, db_path=db_path, embedder=shared_embedder, extractor=shared_extractor)
+        result = ingest_document(md_file, db_path=db_path, embedder=shared_embedder, extractor=shared_extractor)
         from pdf_rag.graph.store import GraphStore
         store = GraphStore(db_path)
         r = store.execute("MATCH (p:Paper {id: $id}) RETURN p.title", {"id": result.paper_id})
         stored_title = r.get_next()[0]
-        # generate_title is called if doc.title is empty — mock may or may not be called
-        # depending on whether docling parses a title from the text; just check stored title is str
         assert isinstance(stored_title, str) and len(stored_title) > 0
 
     def test_idempotent_reingest(self, md_file, tmp_path, shared_embedder, shared_extractor) -> None:

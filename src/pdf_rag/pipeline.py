@@ -29,7 +29,6 @@ from pdf_rag.graph.store import GraphStore
 from pdf_rag.ingestion.chunker import chunk_document
 from pdf_rag.ingestion.embedder import Embedder
 from pdf_rag.ingestion.parser import parse_document
-from pdf_rag.llm import generate_title
 
 
 @dataclass
@@ -102,9 +101,13 @@ def prepare_document(
     topics = normalise_topics(raw_topics)
 
     paper_id = _paper_id(file_path)
-    title = doc.title or generate_title(
-        doc.abstract or " ".join(s["text"] for s in doc.sections[:2]),
-        fallback=file_path.stem,
+    # Title priority: docling TITLE label → first section heading → filename stem
+    # (The local Qwen3 LLM is a reasoning model and produces unusable output for
+    # short completions, so LLM title generation is disabled.)
+    title = (
+        doc.title
+        or (doc.sections[0]["heading"] if doc.sections and doc.sections[0]["heading"] else "")
+        or file_path.stem
     )
 
     prepared_chunks = [
