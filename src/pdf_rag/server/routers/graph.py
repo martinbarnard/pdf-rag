@@ -83,7 +83,7 @@ async def paper_detail(paper_id: str, request: Request) -> dict:
     store = _store(request)
 
     r = store.execute(
-        "MATCH (p:Paper {id: $id}) RETURN p.id, p.title, p.abstract, p.year, p.doi, p.file_path",
+        "MATCH (p:Paper {id: $id}) RETURN p.id, p.title, p.abstract, p.year, p.doi, p.file_path, p.summary",
         {"id": paper_id},
     )
     if not r.has_next():
@@ -91,7 +91,7 @@ async def paper_detail(paper_id: str, request: Request) -> dict:
     row = r.get_next()
     paper = {
         "id": row[0], "title": row[1], "abstract": row[2],
-        "year": row[3], "doi": row[4], "file_path": row[5],
+        "year": row[3], "doi": row[4], "file_path": row[5], "summary": row[6] or "",
     }
 
     ar = store.execute(

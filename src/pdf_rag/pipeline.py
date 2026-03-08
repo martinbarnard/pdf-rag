@@ -24,11 +24,12 @@ from pathlib import Path
 from pdf_rag.config import DEFAULT_DB_PATH
 from pdf_rag.extraction.citations import extract_citations
 from pdf_rag.extraction.entities import EntityExtractor
-from pdf_rag.extraction.normaliser import normalise_authors, normalise_topics
+from pdf_rag.extraction.normaliser import clean_topic, normalise_authors, normalise_topics
 from pdf_rag.graph.store import GraphStore
 from pdf_rag.ingestion.chunker import chunk_document
 from pdf_rag.ingestion.embedder import Embedder
 from pdf_rag.ingestion.parser import parse_document
+from pdf_rag.llm import enrich_paper
 
 
 @dataclass
@@ -62,6 +63,8 @@ class PreparedDocument:
     topics: list[dict]            # [{"canonical_name": str}]
     chunks: list[_PreparedChunk]
     citation_count: int
+    summary: str = ""
+    llm_keywords: list[str] = field(default_factory=list)
 
 
 def prepare_document(
@@ -102,13 +105,20 @@ def prepare_document(
 
     paper_id = _paper_id(file_path)
     # Title priority: docling TITLE label → first section heading → filename stem
-    # (The local Qwen3 LLM is a reasoning model and produces unusable output for
-    # short completions, so LLM title generation is disabled.)
     title = (
         doc.title
         or (doc.sections[0]["heading"] if doc.sections and doc.sections[0]["heading"] else "")
         or file_path.stem
     )
+
+    # LLM enrichment: summary + keyword topics (graceful no-op if LLM unavailable)
+    enrich_text = (doc.abstract or sample_text)[:1200]
+    enrichment = enrich_paper(enrich_text)
+    summary = enrichment.get("summary", "") or ""
+    llm_keywords = [
+        clean_topic(kw) for kw in enrichment.get("keywords", [])
+        if clean_topic(kw)
+    ]
 
     prepared_chunks = [
         _PreparedChunk(id=c.id, text=c.text, section=c.section, embedding=list(emb))
@@ -127,6 +137,8 @@ def prepare_document(
         topics=topics,
         chunks=prepared_chunks,
         citation_count=len(citations),
+        summary=summary,
+        llm_keywords=llm_keywords,
     )
 
 
@@ -150,6 +162,7 @@ def store_prepared(prepared: PreparedDocument, store: GraphStore) -> IngestResul
         doi=prepared.doi,
         arxiv_id=prepared.arxiv_id,
         file_path=str(prepared.file_path),
+        summary=prepared.summary,
     )
 
     for author in prepared.authors:
@@ -161,13 +174,17 @@ def store_prepared(prepared: PreparedDocument, store: GraphStore) -> IngestResul
         )
         store.link_author_paper(author_id, prepared.paper_id)
 
-    for topic in prepared.topics:
-        topic_id = _slug(topic["canonical_name"])
-        store.add_topic(
-            id=topic_id,
-            name=topic["canonical_name"],
-            canonical_name=topic["canonical_name"],
-        )
+    # Entity-extracted topics + LLM keywords merged (deduped by slug)
+    all_topic_names = (
+        [t["canonical_name"] for t in prepared.topics] + prepared.llm_keywords
+    )
+    seen_topic_ids: set[str] = set()
+    for name in all_topic_names:
+        topic_id = _slug(name)
+        if topic_id in seen_topic_ids:
+            continue
+        seen_topic_ids.add(topic_id)
+        store.add_topic(id=topic_id, name=name, canonical_name=name)
         store.link_paper_topic(prepared.paper_id, topic_id)
 
     for chunk in prepared.chunks:

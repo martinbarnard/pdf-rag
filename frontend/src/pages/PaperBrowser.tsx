@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
-import { FileText, ChevronRight, User, Tag, Quote, BookOpen, FileSearch, ChevronDown, ChevronUp, Download, ChevronLeft as PrevIcon, ChevronRight as NextIcon } from 'lucide-react'
+import { FileText, ChevronRight, User, Tag, Quote, BookOpen, FileSearch, ChevronDown, ChevronUp, Download, ChevronLeft as PrevIcon, ChevronRight as NextIcon, ZoomIn, ZoomOut } from 'lucide-react'
 import * as pdfjsLib from 'pdfjs-dist'
 
 // Point the worker at the bundled worker copy served from /app/assets/
@@ -24,6 +24,7 @@ interface PaperDetail {
   id: string
   title: string
   abstract: string
+  summary: string
   year: number
   doi: string
   file_path: string
@@ -59,10 +60,13 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
   )
 }
 
+const ZOOM_STEPS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+
 function PdfViewer({ paperId, filename }: { paperId: string; filename: string }) {
   const [open, setOpen] = useState(false)
   const [pageNum, setPageNum] = useState(1)
   const [numPages, setNumPages] = useState(0)
+  const [zoomIdx, setZoomIdx] = useState(2)  // default 1.0×
   const [rendering, setRendering] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -85,7 +89,7 @@ function PdfViewer({ paperId, filename }: { paperId: string; filename: string })
     return () => { cancelled = true }
   }, [open, url])
 
-  // Render current page whenever pageNum or pdf changes
+  // Render current page whenever pageNum, zoom, or pdf changes
   useEffect(() => {
     const pdf = pdfRef.current
     const canvas = canvasRef.current
@@ -94,7 +98,14 @@ function PdfViewer({ paperId, filename }: { paperId: string; filename: string })
     setRendering(true)
     pdf.getPage(pageNum).then(page => {
       if (cancelled) return
-      const viewport = page.getViewport({ scale: 1.5 })
+      const dpr = window.devicePixelRatio || 1
+      const containerWidth = canvas.parentElement?.clientWidth ?? 600
+      const baseViewport = page.getViewport({ scale: 1 })
+      const fitScale = containerWidth / baseViewport.width
+      const scale = fitScale * ZOOM_STEPS[zoomIdx] * dpr
+      const viewport = page.getViewport({ scale })
+      canvas.style.width = `${viewport.width / dpr}px`
+      canvas.style.height = `${viewport.height / dpr}px`
       canvas.width = viewport.width
       canvas.height = viewport.height
       return page.render({ canvasContext: canvas.getContext('2d')!, viewport, canvas }).promise
@@ -104,7 +115,7 @@ function PdfViewer({ paperId, filename }: { paperId: string; filename: string })
       if (!cancelled) { setError(String(e.message ?? e)); setRendering(false) }
     })
     return () => { cancelled = true }
-  }, [pageNum, numPages, open])
+  }, [pageNum, numPages, zoomIdx, open])
 
   return (
     <div className="border border-gray-800 rounded-lg overflow-hidden">
@@ -145,25 +156,24 @@ function PdfViewer({ paperId, filename }: { paperId: string; filename: string })
                   </div>
                 )}
               </div>
-              {numPages > 1 && (
-                <div className="flex items-center justify-center gap-3 py-2 border-t border-gray-800 text-sm text-gray-400">
-                  <button
-                    onClick={() => setPageNum(p => Math.max(1, p - 1))}
-                    disabled={pageNum <= 1}
-                    className="p-1 hover:text-gray-100 disabled:opacity-30"
-                  >
-                    <PrevIcon size={16} />
-                  </button>
-                  <span>Page {pageNum} of {numPages}</span>
-                  <button
-                    onClick={() => setPageNum(p => Math.min(numPages, p + 1))}
-                    disabled={pageNum >= numPages}
-                    className="p-1 hover:text-gray-100 disabled:opacity-30"
-                  >
-                    <NextIcon size={16} />
-                  </button>
+              <div className="flex items-center justify-between px-3 py-2 border-t border-gray-800 text-sm text-gray-400">
+                {/* Page controls */}
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setPageNum(p => Math.max(1, p - 1))} disabled={pageNum <= 1}
+                    className="p-1 hover:text-gray-100 disabled:opacity-30"><PrevIcon size={15} /></button>
+                  <span className="text-xs">{numPages > 0 ? `${pageNum} / ${numPages}` : '—'}</span>
+                  <button onClick={() => setPageNum(p => Math.min(numPages, p + 1))} disabled={pageNum >= numPages || numPages === 0}
+                    className="p-1 hover:text-gray-100 disabled:opacity-30"><NextIcon size={15} /></button>
                 </div>
-              )}
+                {/* Zoom controls */}
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setZoomIdx(z => Math.max(0, z - 1))} disabled={zoomIdx === 0}
+                    className="p-1 hover:text-gray-100 disabled:opacity-30"><ZoomOut size={15} /></button>
+                  <span className="text-xs w-10 text-center">{Math.round(ZOOM_STEPS[zoomIdx] * 100)}%</span>
+                  <button onClick={() => setZoomIdx(z => Math.min(ZOOM_STEPS.length - 1, z + 1))} disabled={zoomIdx === ZOOM_STEPS.length - 1}
+                    className="p-1 hover:text-gray-100 disabled:opacity-30"><ZoomIn size={15} /></button>
+                </div>
+              </div>
             </>
           )}
         </div>
@@ -279,11 +289,19 @@ export default function PaperBrowser() {
               </div>
             </div>
 
-            {/* Abstract */}
-            {detail.abstract && (
+            {/* Summary (LLM-generated) or Abstract */}
+            {(detail.summary || detail.abstract) && (
               <div>
-                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Abstract</h3>
-                <p className="text-sm text-gray-300 leading-relaxed">{detail.abstract}</p>
+                <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                  {detail.summary ? 'Summary' : 'Abstract'}
+                </h3>
+                <p className="text-sm text-gray-300 leading-relaxed">{detail.summary || detail.abstract}</p>
+                {detail.summary && detail.abstract && (
+                  <details className="mt-2">
+                    <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-300">Show abstract</summary>
+                    <p className="text-sm text-gray-400 leading-relaxed mt-1">{detail.abstract}</p>
+                  </details>
+                )}
               </div>
             )}
 

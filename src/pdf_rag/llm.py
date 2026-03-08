@@ -220,16 +220,128 @@ def _call_local_raw(prompt: str) -> str:
 
 
 def _strip_thinking(text: str) -> str:
-    """Remove <think>...</think> reasoning blocks produced by Qwen3/DeepSeek-R1.
-
-    Also strips any leading prose that precedes the actual answer — some models
-    narrate their reasoning in plain text before giving the result. We take the
-    last non-empty line as the answer when the text contains multiple lines.
-    """
+    """Remove <think>...</think> reasoning blocks produced by Qwen3/DeepSeek-R1."""
     import re
-    # Remove tagged thinking blocks
-    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-    return cleaned
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+
+# ---------------------------------------------------------------------------
+# Paper enrichment — summary + keywords via JSON mode
+# ---------------------------------------------------------------------------
+
+_ENRICH_PROMPT = """\
+You are a scientific paper analyst. Given the text below, respond with ONLY valid JSON \
+and nothing else — no explanation, no markdown fences.
+
+The JSON must have exactly this shape:
+{{"summary": "<2-3 sentence summary of the paper's contribution>", "keywords": ["keyword1", "keyword2", ...]}}
+
+Rules:
+- summary: 2-3 sentences, plain text, describe the main contribution and findings
+- keywords: 5-10 short noun phrases (2-4 words each), most important concepts/methods
+- Output ONLY the JSON object, starting with {{ and ending with }}
+
+Text:
+{text}"""
+
+
+def enrich_paper(
+    text: str,
+    backend: str | None = None,
+) -> dict[str, str | list[str]]:
+    """Generate a summary and keyword list for a paper using the LLM.
+
+    Uses JSON mode to avoid reasoning narration from thinking models.
+    Returns a dict with keys ``summary`` (str) and ``keywords`` (list[str]).
+    Returns empty values if the LLM is unavailable or parsing fails.
+
+    Compatible with any OpenAI-compatible server (LM Studio, Ollama) and
+    Anthropic Claude.  Recommended local models (in preference order):
+      - qwen/qwen3.5-9b         — strong; use JSON mode to suppress thinking
+      - qwen2.5-7b-instruct     — fast, non-thinking, reliable JSON output
+      - mistral-7b-instruct     — good structured output, widely available
+      - phi-3-mini-instruct     — lightweight fallback
+
+    Args:
+        text: Abstract + first section text (600-1200 chars recommended).
+        backend: Override LLM backend ("anthropic", "local", "auto").
+
+    Returns:
+        {"summary": str, "keywords": list[str]}
+    """
+    import json
+
+    empty: dict[str, str | list[str]] = {"summary": "", "keywords": []}
+    if not text or not text.strip():
+        return empty
+
+    prompt = _ENRICH_PROMPT.format(text=text[:1200])
+    resolved = backend if backend is not None else LLM_BACKEND
+
+    try:
+        if resolved == "anthropic":
+            raw = _call_anthropic_raw(prompt)
+        elif resolved == "local":
+            raw = _call_local_json(prompt)
+        else:  # auto
+            if probe_local():
+                try:
+                    raw = _call_local_json(prompt)
+                except Exception:
+                    raw = _call_anthropic_raw(prompt)
+            else:
+                raw = _call_anthropic_raw(prompt)
+    except Exception:
+        return empty
+
+    # Strip thinking blocks then extract the JSON object
+    raw = _strip_thinking(raw)
+    # Find the outermost { ... } in case the model added extra prose
+    import re
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not m:
+        return empty
+    try:
+        data = json.loads(m.group())
+    except json.JSONDecodeError:
+        return empty
+
+    summary = str(data.get("summary", "")).strip()
+    keywords = [str(k).strip() for k in data.get("keywords", []) if str(k).strip()]
+    return {"summary": summary, "keywords": keywords}
+
+
+def _call_local_json(prompt: str) -> str:
+    """Call local server requesting JSON output.
+
+    Passes response_format=json_object when supported (LM Studio ≥0.3,
+    Ollama ≥0.1.28), which forces the model to emit valid JSON regardless
+    of thinking mode.  Falls back gracefully if the server ignores it.
+    """
+    import httpx
+
+    url = LOCAL_LLM_BASE_URL.rstrip("/") + "/v1/chat/completions"
+    resp = httpx.post(
+        url,
+        json={
+            "model": LOCAL_LLM_MODEL,
+            "messages": [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": "{"},  # prefill opening brace
+            ],
+            "max_tokens": 512,
+            "temperature": 0.1,
+            "response_format": {"type": "json_object"},
+            "chat_template_kwargs": {"enable_thinking": False},
+        },
+        timeout=60.0,
+    )
+    resp.raise_for_status()
+    content: str = resp.json()["choices"][0]["message"]["content"]
+    # Prepend the prefill brace if the model didn't echo it
+    if not content.lstrip().startswith("{"):
+        content = "{" + content
+    return _strip_thinking(content)
 
 
 def _call_local(context: str, query: str) -> str:
