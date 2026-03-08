@@ -81,18 +81,98 @@ export default function GraphExplorer() {
     cy.layout({
       name,
       animate: true,
-      animationDuration: 400,
+      animationDuration: 500,
       ...(name === 'fcose' ? {
-        quality: 'default',
+        quality: 'proof',           // minimise edge crossings
         randomize: false,
         nodeDimensionsIncludeLabels: true,
-        nodeRepulsion: 6000,
-        idealEdgeLength: 120,
-        edgeElasticity: 0.4,
-        gravity: 0.25,
+        nodeRepulsion: 18000,       // strong repulsion prevents overlaps
+        idealEdgeLength: 150,
+        edgeElasticity: 0.3,
+        gravity: 0.2,
+        gravityRange: 3.8,
+        numIter: 5000,
+        tile: true,                 // tile disconnected components so they don't overlap
+        tilingPaddingVertical: 30,
+        tilingPaddingHorizontal: 30,
       } : {}),
     } as cytoscape.LayoutOptions).run()
   }, [])
+
+  /**
+   * Add elements then run a local sub-layout on the new nodes + their
+   * immediate neighbourhood so they slot in without overlapping.
+   * Nodes outside the affected set are locked during the animation.
+   */
+  const addAndSettle = useCallback((
+    cy: Core,
+    toAdd: cytoscape.ElementDefinition[],
+    anchorId: string | null,
+  ) => {
+    if (!toAdd.length) return
+
+    // Position new nodes near the anchor before adding so they don't all land at (0,0)
+    if (anchorId) {
+      const anchor = cy.getElementById(anchorId)
+      if (anchor.length) {
+        const ap = anchor.position()
+        const newNodes = toAdd.filter(el => !('source' in el.data))
+        const angleStep = (2 * Math.PI) / Math.max(newNodes.length, 1)
+        const radius = 120 + newNodes.length * 15
+        newNodes.forEach((el, i) => {
+          el.position = {
+            x: ap.x + radius * Math.cos(i * angleStep),
+            y: ap.y + radius * Math.sin(i * angleStep),
+          }
+        })
+      }
+    }
+
+    cy.add(toAdd)
+
+    // Collect the affected neighbourhood for the local re-settle
+    const newNodeIds = new Set(
+      toAdd.filter(el => !('source' in el.data)).map(el => el.data.id as string)
+    )
+    const affected = cy.collection()
+    newNodeIds.forEach(id => {
+      const n = cy.getElementById(id)
+      if (n.length) affected.merge(n.closedNeighborhood().nodes())
+    })
+    if (anchorId) {
+      const anchor = cy.getElementById(anchorId)
+      if (anchor.length) affected.merge(anchor.closedNeighborhood().nodes())
+    }
+
+    if (affected.length < 2) {
+      runLayout(cy, layoutRef.current)
+      return
+    }
+
+    cy.nodes().not(affected).lock()
+    try {
+      affected.layout({
+        name: 'fcose',
+        animate: true,
+        animationDuration: 450,
+        quality: 'proof',
+        randomize: false,
+        nodeDimensionsIncludeLabels: true,
+        nodeRepulsion: 18000,
+        idealEdgeLength: 140,
+        edgeElasticity: 0.3,
+        gravity: 0.15,
+        numIter: 3000,
+        ...(anchorId ? {
+          fixedNodeConstraint: [
+            { nodeId: anchorId, position: cy.getElementById(anchorId).position() },
+          ],
+        } : {}),
+      } as cytoscape.LayoutOptions).run()
+    } finally {
+      setTimeout(() => cy.nodes().unlock(), 500)
+    }
+  }, [runLayout])
 
   const addGhostResults = useCallback((results: ArxivResult[]) => {
     const cy = cyRef.current
@@ -136,10 +216,9 @@ export default function GraphExplorer() {
     }
 
     if (toAdd.length) {
-      cy.add(toAdd)
-      runLayout(cy, layoutRef.current)
+      addAndSettle(cy, toAdd, null)
     }
-  }, [runLayout])
+  }, [addAndSettle])
 
   const searchArxiv = useCallback(async (terms: string[], author = '') => {
     setArxivSearching(true)
@@ -212,8 +291,7 @@ export default function GraphExplorer() {
               overviewRef.current = newData
               const newPaperNode = newData.nodes.find(n => n.data.id === job.paper_id)
               if (newPaperNode && !cy.getElementById(job.paper_id).length) {
-                cy.add({ data: newPaperNode.data })
-                runLayout(cy, layoutRef.current)
+                addAndSettle(cy, [{ data: newPaperNode.data }], null)
               }
             }
           }
@@ -303,7 +381,7 @@ export default function GraphExplorer() {
               if (!cy.getElementById(edge.data.id).length)
                 toAdd.push({ data: edge.data })
             }
-            if (toAdd.length) { cy.add(toAdd); runLayout(cy, layoutRef.current) }
+            if (toAdd.length) { addAndSettle(cy, toAdd, id) }
             expandedRef.current.add(id)
           }
         })
@@ -338,7 +416,7 @@ export default function GraphExplorer() {
       .catch(e => { setError(String(e)); setLoading(false) })
 
     return () => { cyRef.current?.destroy(); cyRef.current = null }
-  }, [runLayout, searchArxiv, searchRelatedArxiv])
+  }, [runLayout, addAndSettle, searchArxiv, searchRelatedArxiv])
 
   useEffect(() => {
     if (cyRef.current) runLayout(cyRef.current, layout)
@@ -363,12 +441,12 @@ export default function GraphExplorer() {
         if (!cy.getElementById(edge.data.id).length)
           toAdd.push({ data: edge.data })
       }
-      if (toAdd.length) { cy.add(toAdd); runLayout(cy, layout) }
+      if (toAdd.length) { addAndSettle(cy, toAdd, selected.id) }
       expandedRef.current.add(selected.id)
     } finally {
       setExpanding(false)
     }
-  }, [selected, layout, runLayout])
+  }, [selected, addAndSettle])
 
   const goToDetail = useCallback(() => {
     if (!selected) return
