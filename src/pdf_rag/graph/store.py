@@ -326,6 +326,63 @@ class GraphStore:
             rows.append(dict(zip(keys, row)))
         return rows
 
+    def paper_context(self, paper_id: str) -> dict:
+        """Return metadata needed to build an arXiv search for a paper.
+
+        Returns a dict with keys:
+            arxiv_id, title, topics (list[str]), authors (list[str]),
+            chunk_embeddings (list[list[float]])
+        Returns None if the paper is not found.
+        """
+        r = self._conn.execute(
+            "MATCH (p:Paper {id: $id}) RETURN p.title, p.arxiv_id",
+            {"id": paper_id},
+        )
+        if not r.has_next():
+            return {}
+        row = r.get_next()
+        title, arxiv_id = row[0], row[1] or ""
+
+        tr = self._conn.execute(
+            "MATCH (p:Paper {id: $id})-[:DISCUSSES]->(t:Topic) RETURN t.canonical_name",
+            {"id": paper_id},
+        )
+        topics = [r2.get_next()[0] for r2 in iter(lambda: tr if tr.has_next() else None, None)]
+        topics = []
+        while tr.has_next():
+            topics.append(tr.get_next()[0])
+
+        ar = self._conn.execute(
+            "MATCH (a:Author)-[:AUTHORED]->(p:Paper {id: $id}) RETURN a.canonical_name",
+            {"id": paper_id},
+        )
+        authors: list[str] = []
+        while ar.has_next():
+            authors.append(ar.get_next()[0])
+
+        cr = self._conn.execute(
+            """
+            MATCH (p:Paper {id: $id})-[:HAS_CHUNK]->(c:Chunk)
+            WHERE c.embedding IS NOT NULL
+            RETURN c.embedding
+            LIMIT 20
+            """,
+            {"id": paper_id},
+        )
+        embeddings: list[list[float]] = []
+        while cr.has_next():
+            emb = cr.get_next()[0]
+            if emb is not None:
+                embeddings.append(list(emb))
+
+        return {
+            "arxiv_id": arxiv_id,
+            "title": title,
+            "topics": topics,
+            "authors": authors,
+            "chunk_embeddings": embeddings,
+        }
+
     # ------------------------------------------------------------------
     # Vector search
     # ------------------------------------------------------------------

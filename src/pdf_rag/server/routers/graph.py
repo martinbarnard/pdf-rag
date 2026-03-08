@@ -159,6 +159,44 @@ async def paper_pdf(paper_id: str, request: Request) -> FileResponse:
     )
 
 
+@router.get("/papers/{paper_id}/related-arxiv")
+async def related_arxiv(
+    paper_id: str,
+    request: Request,
+    strategy: str = "all",
+    top_k: int = 10,
+) -> dict:
+    """Find arXiv papers related to a paper in the graph.
+
+    Args:
+        strategy: "topic" | "author" | "arxiv_id" | "all"
+        top_k: Number of results to return (max 25).
+
+    Returns dict with keys:
+        results: list of ArxivResult dicts
+        attribution: arXiv attribution string
+    """
+    from pdf_rag.arxiv import find_related
+
+    top_k = min(top_k, 25)
+    store = _store(request)
+
+    results = find_related(
+        paper_id=paper_id,
+        store=store,
+        strategy=strategy,
+        top_k=top_k,
+        rerank=False,  # no embedder in server context — avoid loading models per-request
+    )
+
+    return {
+        "results": [r.to_dict() for r in results],
+        "attribution": (
+            "Results from arXiv.org. Thank you to arXiv for use of its open access interoperability."
+        ),
+    }
+
+
 @router.get("/graph/overview")
 async def graph_overview(request: Request) -> dict:
     """Full graph snapshot for visualisation: all nodes and edges.

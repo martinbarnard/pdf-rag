@@ -236,5 +236,126 @@ def models() -> None:
     console.print(table)
 
 
+@app.command()
+def related(
+    paper: str = typer.Argument(..., help="Paper ID (graph node ID) or path to the source file."),
+    db: Path = typer.Option(None, "--db", help="Path to the kuzu database directory."),
+    strategy: str = typer.Option("all", "--strategy", help="Search strategy: topic|author|arxiv_id|all."),
+    top_k: int = typer.Option(10, "--top-k", help="Number of results to return."),
+    rerank: bool = typer.Option(True, "--rerank/--no-rerank", help="Re-rank by embedding similarity."),
+    ingest_top: int = typer.Option(0, "--ingest", help="Ingest the top-N results into the database (0 = off)."),
+) -> None:
+    """Find arXiv papers related to a paper already in the graph.
+
+    PAPER can be a graph node ID (16-char hex) or a file path that was
+    previously ingested (the ID is derived from the file path).
+
+    Uses the paper's topics, authors, and/or arXiv ID to query the arXiv
+    API, then optionally re-ranks results by embedding similarity.
+
+    \b
+    Examples:
+      pdf-rag related ca68451d8fe5107a
+      pdf-rag related ~/papers/2301.04567.pdf --strategy topic --top-k 5
+      pdf-rag related ca68451d8fe5107a --ingest 3
+    """
+    import hashlib
+
+    from pdf_rag.arxiv import find_related
+    from pdf_rag.config import DEFAULT_DB_PATH
+    from pdf_rag.graph.store import GraphStore
+
+    db_path = db or DEFAULT_DB_PATH
+    if not Path(db_path).exists():
+        console.print(f"[red]Database not found:[/red] {db_path}")
+        raise typer.Exit(1)
+
+    # Resolve paper_id — either raw ID or derive from file path
+    maybe_path = Path(paper)
+    if maybe_path.exists():
+        paper_id = hashlib.sha1(str(maybe_path.resolve()).encode()).hexdigest()[:16]
+    else:
+        paper_id = paper
+
+    store = GraphStore(db_path)
+
+    embedder = None
+    if rerank:
+        with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
+            t = progress.add_task("Loading embedder for re-ranking...", total=None)
+            from pdf_rag.ingestion.embedder import Embedder
+            embedder = Embedder()
+            progress.remove_task(t)
+
+    with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
+        t = progress.add_task("Searching arXiv...", total=None)
+        results = find_related(
+            paper_id=paper_id,
+            store=store,
+            strategy=strategy,
+            top_k=top_k,
+            rerank=rerank,
+            embedder=embedder,
+        )
+        progress.remove_task(t)
+
+    if not results:
+        console.print("[yellow]No related papers found.[/yellow]")
+        raise typer.Exit(0)
+
+    table = Table(title=f"Related papers from arXiv (strategy={strategy})")
+    table.add_column("#", style="dim", width=3)
+    table.add_column("arXiv ID", style="cyan", no_wrap=True)
+    table.add_column("Title", max_width=55)
+    table.add_column("Authors", max_width=25, style="green")
+    table.add_column("Year", width=6)
+    table.add_column("Score", width=7, justify="right")
+
+    for i, r in enumerate(results, 1):
+        table.add_row(
+            str(i),
+            r.arxiv_id,
+            r.title,
+            ", ".join(r.authors[:2]) + (" et al." if len(r.authors) > 2 else ""),
+            r.published[:4],
+            f"{r.similarity_score:.3f}" if r.similarity_score else "—",
+        )
+
+    console.print(table)
+    console.print(
+        "\n[dim]Thank you to arXiv for use of its open access interoperability.[/dim]"
+    )
+
+    if ingest_top > 0:
+        to_ingest = results[:ingest_top]
+        console.print(f"\nIngesting top {len(to_ingest)} result(s)...")
+        from pdf_rag.extraction.entities import EntityExtractor
+        from pdf_rag.ingestion.embedder import Embedder as _Embedder
+        from pdf_rag.pipeline import ingest_document
+        from pdf_rag.config import DEFAULT_INGEST_DIR
+        import urllib.request
+
+        ingest_dir = DEFAULT_INGEST_DIR
+        ingest_dir.mkdir(parents=True, exist_ok=True)
+        _embedder = embedder or _Embedder()
+        _extractor = EntityExtractor()
+
+        for r in to_ingest:
+            dest = ingest_dir / f"{r.arxiv_id}.pdf"
+            if dest.exists():
+                console.print(f"  [dim]already exists: {dest}[/dim]")
+                continue
+            try:
+                console.print(f"  Downloading {r.arxiv_id}...")
+                urllib.request.urlretrieve(r.pdf_url, dest)
+                result = ingest_document(dest, db_path=db_path, embedder=_embedder, extractor=_extractor)
+                console.print(
+                    f"  [green]✓[/green] {r.title[:60]} "
+                    f"({result.chunk_count} chunks)"
+                )
+            except Exception as e:
+                console.print(f"  [red]✗[/red] {r.arxiv_id}: {e}")
+
+
 if __name__ == "__main__":
     app()
