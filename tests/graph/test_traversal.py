@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import pytest
 
-from pdf_rag.graph.store import GraphStore
+from pdf_rag.graph.store import GraphStore, _release_database
 
 
 @pytest.fixture
-def populated(tmp_path) -> GraphStore:
+def populated(tmp_path):
     """GraphStore seeded with a small connected graph for traversal tests."""
-    s = GraphStore(tmp_path / "traversal.db")
+    db_path = tmp_path / "traversal.db"
+    s = GraphStore(db_path)
 
     # Authors
     s.add_author("a1", "Alice Smith")
@@ -44,7 +45,8 @@ def populated(tmp_path) -> GraphStore:
     # Related topics
     s.link_related_topics("t1", "t2", weight=0.9)
 
-    return s
+    yield s
+    _release_database(db_path)
 
 
 class TestPapersByAuthor:

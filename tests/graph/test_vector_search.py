@@ -7,7 +7,7 @@ import math
 import pytest
 
 from pdf_rag.config import EMBEDDING_DIM
-from pdf_rag.graph.store import GraphStore
+from pdf_rag.graph.store import GraphStore, _release_database
 
 
 def _make_vec(hot_index: int, dim: int = EMBEDDING_DIM) -> list[float]:
@@ -19,8 +19,11 @@ def _make_vec(hot_index: int, dim: int = EMBEDDING_DIM) -> list[float]:
 
 
 @pytest.fixture
-def store(tmp_path) -> GraphStore:
-    return GraphStore(tmp_path / "vec_test.db")
+def store(tmp_path):
+    db_path = tmp_path / "vec_test.db"
+    s = GraphStore(db_path)
+    yield s
+    _release_database(db_path)
 
 
 class TestSearchSimilarChunks:

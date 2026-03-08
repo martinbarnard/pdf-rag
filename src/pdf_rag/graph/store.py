@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -9,14 +10,51 @@ import kuzu
 
 from pdf_rag.graph.schema import create_schema
 
+# ---------------------------------------------------------------------------
+# Process-level Database singleton
+#
+# kuzu only allows ONE kuzu.Database object per database path per process.
+# Opening a second one raises "unordered_map::at" (IndexError).  Multiple
+# kuzu.Connection objects on the same Database are fine, so we share one
+# Database and hand each GraphStore its own Connection.
+# ---------------------------------------------------------------------------
+
+_db_instances: dict[str, kuzu.Database] = {}
+_db_lock = threading.Lock()
+
+
+def _get_database(db_path: Path) -> kuzu.Database:
+    """Return the shared kuzu.Database for the given path, creating it if needed."""
+    key = str(db_path.resolve())
+    with _db_lock:
+        if key not in _db_instances:
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            _db_instances[key] = kuzu.Database(str(db_path))
+        return _db_instances[key]
+
+
+def _release_database(db_path: Path) -> None:
+    """Remove the cached Database for *db_path* (test teardown only).
+
+    After calling this, the next GraphStore opened on the same path will create
+    a fresh kuzu.Database.  Do NOT call this in production code.
+    """
+    key = str(db_path.resolve())
+    with _db_lock:
+        _db_instances.pop(key, None)
+
 
 class GraphStore:
-    """Thin wrapper around a kuzu database that enforces the project schema."""
+    """Thin wrapper around a kuzu database that enforces the project schema.
+
+    Multiple GraphStore instances for the same path safely share one
+    kuzu.Database object (process singleton) and each get their own
+    kuzu.Connection.
+    """
 
     def __init__(self, db_path: Path | str) -> None:
         db_path = Path(db_path)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = kuzu.Database(str(db_path))
+        self._db = _get_database(db_path)
         self._conn = kuzu.Connection(self._db)
         create_schema(self._conn)
 

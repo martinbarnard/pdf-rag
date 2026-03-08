@@ -12,19 +12,25 @@ from pdf_rag.graph.store import GraphStore
 
 
 @pytest.fixture()
-def tmp_db(tmp_path: Path) -> GraphStore:
+def tmp_db(tmp_path: Path):
     """Return a GraphStore backed by a fresh temporary database."""
-    return GraphStore(tmp_path / "test_graph.db")
+    from pdf_rag.graph.store import _release_database
+    db_path = tmp_path / "test_graph.db"
+    store = GraphStore(db_path)
+    yield store
+    _release_database(db_path)
 
 
 @pytest.fixture()
-def tmp_conn(tmp_path: Path) -> kuzu.Connection:
+def tmp_conn(tmp_path: Path):
     """Return a raw kuzu.Connection for schema-level tests."""
+    from pdf_rag.graph.store import _get_database, _release_database
     db_path = tmp_path / "schema_test.db"
-    db = kuzu.Database(str(db_path))
+    db = _get_database(db_path)
     conn = kuzu.Connection(db)
     create_schema(conn)
-    return conn
+    yield conn
+    _release_database(db_path)
 
 
 @pytest.fixture()
