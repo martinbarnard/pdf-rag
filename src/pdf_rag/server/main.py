@@ -59,10 +59,11 @@ def create_app(db_path: Path | None = None, ingest_dir: Path | None = None) -> F
         return {"status": "ok"}
 
     # Register API routers
-    from pdf_rag.server.routers import graph, ingest, search
+    from pdf_rag.server.routers import admin, graph, ingest, search
     app.include_router(graph.router, prefix="/api")
     app.include_router(search.router, prefix="/api")
     app.include_router(ingest.router, prefix="/api")
+    app.include_router(admin.router, prefix="/api")
 
     # Serve built frontend assets (JS/CSS/images)
     _STATIC_DIR.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom'
-import { Network, BookOpen, Tag, Upload, Search } from 'lucide-react'
+import { Network, BookOpen, Tag, Upload, Search, Settings as SettingsIcon } from 'lucide-react'
 import { useApi } from './hooks/useApi'
 import { IngestProvider, useIngest } from './context/IngestContext'
 import GraphExplorer from './pages/GraphExplorer'
@@ -9,13 +9,15 @@ import TopicDetail from './pages/TopicDetail'
 import AuthorDetail from './pages/AuthorDetail'
 import IngestUI from './pages/IngestUI'
 import SearchPage from './pages/Search'
+import SettingsPage from './pages/Settings'
 
 const NAV = [
-  { to: '/graph',  label: 'Graph',  icon: Network  },
-  { to: '/papers', label: 'Papers', icon: BookOpen  },
-  { to: '/topics', label: 'Topics', icon: Tag       },
-  { to: '/search', label: 'Search', icon: Search    },
-  { to: '/ingest', label: 'Ingest', icon: Upload    },
+  { to: '/graph',    label: 'Graph',    icon: Network       },
+  { to: '/papers',   label: 'Papers',   icon: BookOpen      },
+  { to: '/topics',   label: 'Topics',   icon: Tag           },
+  { to: '/search',   label: 'Search',   icon: Search        },
+  { to: '/ingest',   label: 'Ingest',   icon: Upload        },
+  { to: '/settings', label: 'Settings', icon: SettingsIcon  },
 ]
 
 interface Stats { papers: number; authors: number; topics: number; chunks: number }
@@ -91,6 +93,7 @@ export default function App() {
             <Route path="/authors/:id"  element={<AuthorDetail />} />
             <Route path="/search"       element={<SearchPage />} />
             <Route path="/ingest"       element={<IngestUI />} />
+            <Route path="/settings"     element={<SettingsPage />} />
           </Routes>
         </main>
       </div>
