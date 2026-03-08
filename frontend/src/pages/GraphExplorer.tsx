@@ -7,6 +7,7 @@ import { LayoutGrid, RefreshCw, X, ChevronDown } from 'lucide-react'
 import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
 import { attachDragNeighbours } from '../utils/cyDragNeighbours'
+import { GRAPH_STYLESHEET } from '../utils/cyStylesheet'
 
 cytoscape.use(fcose)
 
@@ -27,39 +28,6 @@ const LAYOUTS: { key: Layout; label: string }[] = [
   { key: 'circle',       label: 'Circle' },
 ]
 
-const STYLESHEET: cytoscape.StylesheetJson = [
-  {
-    selector: 'node',
-    style: {
-      label: 'data(label)',
-      'font-size': 10,
-      color: '#e5e7eb',
-      'text-valign': 'bottom',
-      'text-margin-y': 4,
-      'text-max-width': '80px',
-      'text-wrap': 'ellipsis',
-      width: 28,
-      height: 28,
-      'background-color': '#6b7280',
-      'border-width': 0,
-    },
-  },
-  { selector: 'node[type="Paper"]',  style: { 'background-color': '#6366f1' } },
-  { selector: 'node[type="Author"]', style: { 'background-color': '#22c55e' } },
-  { selector: 'node[type="Topic"]',  style: { 'background-color': '#f59e0b' } },
-  { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#ffffff' } },
-  {
-    selector: 'edge',
-    style: {
-      'line-color': '#4b5563',
-      'target-arrow-color': '#4b5563',
-      'target-arrow-shape': 'triangle',
-      'arrow-scale': 0.8,
-      width: 1.5,
-      'curve-style': 'bezier',
-    },
-  },
-]
 
 export default function GraphExplorer() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -110,7 +78,7 @@ export default function GraphExplorer() {
         const cy = cytoscape({
           container: containerRef.current!,
           elements: paperNodes,
-          style: STYLESHEET,
+          style: GRAPH_STYLESHEET,
         })
         cyRef.current = cy
         attachDragNeighbours(cy)

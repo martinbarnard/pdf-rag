@@ -8,6 +8,7 @@ import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
 import { Tag, ArrowLeft, FileText } from 'lucide-react'
 import { attachDragNeighbours } from '../utils/cyDragNeighbours'
+import { buildDetailStylesheet } from '../utils/cyStylesheet'
 
 cytoscape.use(fcose)
 
@@ -15,6 +16,12 @@ interface Paper { id: string; title?: string; label?: string }
 interface Related { id: string; canonical_name: string; weight: number }
 
 const COLOURS = { paper: '#6366f1', topic: '#f59e0b', current: '#e11d48' }
+const DETAIL_STYLE = buildDetailStylesheet({
+  current: COLOURS.current,
+  paper: COLOURS.paper,
+  secondary: COLOURS.topic,
+  secondaryIcon: 'topic',
+})
 
 export default function TopicDetail() {
   const { id } = useParams<{ id: string }>()
@@ -60,39 +67,7 @@ export default function TopicDetail() {
     const cy = cytoscape({
       container: containerRef.current,
       elements: [...nodes, ...edges],
-      style: [
-        {
-          selector: 'node',
-          style: {
-            label: 'data(label)',
-            'font-size': 10,
-            color: '#e5e7eb',
-            'text-valign': 'bottom',
-            'text-margin-y': 4,
-            'text-max-width': '90px',
-            'text-wrap': 'ellipsis',
-            width: 26,
-            height: 26,
-            'background-color': '#6b7280',
-            'border-width': 0,
-          },
-        },
-        { selector: 'node[nodeType="current"]', style: { 'background-color': COLOURS.current, width: 36, height: 36, 'font-size': 12 } },
-        { selector: 'node[nodeType="paper"]',   style: { 'background-color': COLOURS.paper } },
-        { selector: 'node[nodeType="topic"]',   style: { 'background-color': COLOURS.topic } },
-        { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#ffffff' } },
-        {
-          selector: 'edge',
-          style: {
-            'line-color': '#374151',
-            'target-arrow-color': '#374151',
-            'target-arrow-shape': 'triangle',
-            'arrow-scale': 0.7,
-            width: 1.2,
-            'curve-style': 'bezier',
-          },
-        },
-      ] as cytoscape.StylesheetJson,
+      style: DETAIL_STYLE,
     })
 
     cy.layout({ name: 'fcose', animate: true, animationDuration: 400 } as cytoscape.LayoutOptions).run()

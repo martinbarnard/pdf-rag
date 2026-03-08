@@ -8,6 +8,7 @@ import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
 import { Tag, ChevronRight } from 'lucide-react'
 import { attachDragNeighbours } from '../utils/cyDragNeighbours'
+import { GRAPH_STYLESHEET } from '../utils/cyStylesheet'
 
 cytoscape.use(fcose)
 
@@ -57,37 +58,7 @@ export default function TopicMap() {
     const cy = cytoscape({
       container: containerRef.current,
       elements: [...topicNodes, ...topicEdges],
-      style: [
-        {
-          selector: 'node',
-          style: {
-            label: 'data(label)',
-            'font-size': 11,
-            color: '#e5e7eb',
-            'text-valign': 'bottom',
-            'text-margin-y': 4,
-            'text-max-width': '80px',
-            'text-wrap': 'ellipsis',
-            width: 24,
-            height: 24,
-            'background-color': '#f59e0b',
-            'border-width': 0,
-          },
-        },
-        { selector: 'node[type="Paper"]', style: { 'background-color': '#6366f1' } },
-        { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#ffffff' } },
-        {
-          selector: 'edge',
-          style: {
-            'line-color': '#4b5563',
-            'target-arrow-color': '#4b5563',
-            'target-arrow-shape': 'triangle',
-            'arrow-scale': 0.7,
-            width: 1.5,
-            'curve-style': 'bezier',
-          },
-        },
-      ] as cytoscape.StylesheetJson,
+      style: GRAPH_STYLESHEET,
     })
 
     cy.layout(FCOSE_OPTS).run()
