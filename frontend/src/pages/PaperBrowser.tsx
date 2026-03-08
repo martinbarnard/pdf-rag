@@ -1,9 +1,16 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
-import { FileText, ChevronRight, User, Tag, Quote, BookOpen, FileSearch, ChevronDown, ChevronUp } from 'lucide-react'
+import { FileText, ChevronRight, User, Tag, Quote, BookOpen, FileSearch, ChevronDown, ChevronUp, Download, ChevronLeft as PrevIcon, ChevronRight as NextIcon } from 'lucide-react'
+import * as pdfjsLib from 'pdfjs-dist'
+
+// Point the worker at the bundled worker copy served from /app/assets/
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString()
 
 interface PaperSummary {
   id: string
@@ -52,29 +59,114 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
   )
 }
 
-function PdfViewer({ paperId }: { paperId: string }) {
+function PdfViewer({ paperId, filename }: { paperId: string; filename: string }) {
   const [open, setOpen] = useState(false)
+  const [pageNum, setPageNum] = useState(1)
+  const [numPages, setNumPages] = useState(0)
+  const [rendering, setRendering] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const pdfRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null)
   const url = `/api/papers/${paperId}/pdf`
+
+  // Load PDF when opened
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    setError(null)
+    pdfjsLib.getDocument(url).promise.then(pdf => {
+      if (cancelled) return
+      pdfRef.current = pdf
+      setNumPages(pdf.numPages)
+      setPageNum(1)
+    }).catch(e => {
+      if (!cancelled) setError(String(e.message ?? e))
+    })
+    return () => { cancelled = true }
+  }, [open, url])
+
+  // Render current page whenever pageNum or pdf changes
+  useEffect(() => {
+    const pdf = pdfRef.current
+    const canvas = canvasRef.current
+    if (!pdf || !canvas || !open) return
+    let cancelled = false
+    setRendering(true)
+    pdf.getPage(pageNum).then(page => {
+      if (cancelled) return
+      const viewport = page.getViewport({ scale: 1.5 })
+      canvas.width = viewport.width
+      canvas.height = viewport.height
+      return page.render({ canvasContext: canvas.getContext('2d')!, viewport, canvas }).promise
+    }).then(() => {
+      if (!cancelled) setRendering(false)
+    }).catch(e => {
+      if (!cancelled) { setError(String(e.message ?? e)); setRendering(false) }
+    })
+    return () => { cancelled = true }
+  }, [pageNum, numPages, open])
 
   return (
     <div className="border border-gray-800 rounded-lg overflow-hidden">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="w-full flex items-center justify-between px-4 py-2.5 bg-gray-900 hover:bg-gray-800 transition-colors text-sm text-gray-300"
-      >
-        <span className="flex items-center gap-2">
-          <FileSearch size={14} className="text-indigo-400" />
-          View PDF
-        </span>
-        {open ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
-      </button>
+      {/* Header bar */}
+      <div className="flex items-center bg-gray-900 border-b border-gray-800">
+        <button
+          onClick={() => setOpen(o => !o)}
+          className="flex-1 flex items-center justify-between px-4 py-2.5 hover:bg-gray-800 transition-colors text-sm text-gray-300"
+        >
+          <span className="flex items-center gap-2">
+            <FileSearch size={14} className="text-indigo-400" />
+            View PDF
+          </span>
+          {open ? <ChevronUp size={14} className="text-gray-500" /> : <ChevronDown size={14} className="text-gray-500" />}
+        </button>
+        <a
+          href={url}
+          download={filename}
+          className="flex items-center gap-1.5 px-3 py-2.5 text-xs text-gray-400 hover:text-gray-100 hover:bg-gray-800 transition-colors border-l border-gray-800"
+          title="Download PDF"
+        >
+          <Download size={13} />
+          Download
+        </a>
+      </div>
+
+      {/* PDF canvas */}
       {open && (
-        <iframe
-          src={url}
-          title="PDF viewer"
-          className="w-full bg-gray-950"
-          style={{ height: '70vh' }}
-        />
+        <div className="bg-gray-950">
+          {error && <p className="p-4 text-sm text-red-400">{error}</p>}
+          {!error && (
+            <>
+              <div className="overflow-auto" style={{ maxHeight: '70vh' }}>
+                <canvas ref={canvasRef} className="mx-auto block" />
+                {rendering && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-950/60">
+                    <Spinner label="Rendering…" />
+                  </div>
+                )}
+              </div>
+              {numPages > 1 && (
+                <div className="flex items-center justify-center gap-3 py-2 border-t border-gray-800 text-sm text-gray-400">
+                  <button
+                    onClick={() => setPageNum(p => Math.max(1, p - 1))}
+                    disabled={pageNum <= 1}
+                    className="p-1 hover:text-gray-100 disabled:opacity-30"
+                  >
+                    <PrevIcon size={16} />
+                  </button>
+                  <span>Page {pageNum} of {numPages}</span>
+                  <button
+                    onClick={() => setPageNum(p => Math.min(numPages, p + 1))}
+                    disabled={pageNum >= numPages}
+                    className="p-1 hover:text-gray-100 disabled:opacity-30"
+                  >
+                    <NextIcon size={16} />
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
     </div>
   )
@@ -216,7 +308,7 @@ export default function PaperBrowser() {
             )}
 
             {/* PDF viewer */}
-            {isPdf && <PdfViewer paperId={detail.id} />}
+            {isPdf && <PdfViewer paperId={detail.id} filename={detail.file_path.split('/').pop() ?? 'paper.pdf'} />}
 
             {/* File path */}
             {detail.file_path && (
