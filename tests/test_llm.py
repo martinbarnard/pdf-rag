@@ -249,6 +249,42 @@ class TestGenerateTitle:
         result = generate_title("", backend="anthropic", fallback="untitled")
         assert result == "untitled"
 
+class TestStripThinking:
+    """Tests for _strip_thinking — removes <think>...</think> blocks."""
+
+    def test_strips_think_block(self) -> None:
+        from pdf_rag.llm import _strip_thinking
+        raw = "<think>Step 1: analyse...\nStep 2: reason...</think>\nAttention Is All You Need"
+        assert _strip_thinking(raw) == "Attention Is All You Need"
+
+    def test_no_think_block_unchanged(self) -> None:
+        from pdf_rag.llm import _strip_thinking
+        assert _strip_thinking("Normal title") == "Normal title"
+
+    def test_strips_multiline_think_block(self) -> None:
+        from pdf_rag.llm import _strip_thinking
+        raw = "<think>\nLong reasoning\nacross lines\n</think>\nFinal Answer"
+        assert _strip_thinking(raw) == "Final Answer"
+
+    def test_strips_only_think_not_other_tags(self) -> None:
+        from pdf_rag.llm import _strip_thinking
+        raw = "<think>ignore</think>Keep <b>this</b>"
+        assert _strip_thinking(raw) == "Keep <b>this</b>"
+
+    def test_call_local_strips_thinking_in_response(self) -> None:
+        from pdf_rag.llm import _call_local
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "<think>reasoning</think>actual answer"}}]
+        }
+        with patch("pdf_rag.llm.LOCAL_LLM_BASE_URL", "http://localhost:1234"):
+            with patch("pdf_rag.llm.LOCAL_LLM_MODEL", "test-model"):
+                with patch("httpx.post", return_value=mock_resp):
+                    result = _call_local(CONTEXT, QUERY)
+        assert result == "actual answer"
+
     def test_call_local_empty_context(self) -> None:
         from pdf_rag.llm import _call_local
 

@@ -66,10 +66,13 @@ export default function GraphExplorer() {
   // full overview kept in memory for edge lookups when expanding
   const overviewRef = useRef<OverviewData | null>(null)
   const expandedRef = useRef<Set<string>>(new Set())
+  const layoutRef = useRef<Layout>('fcose')
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [layout, setLayout] = useState<Layout>('fcose')
+  // Keep layoutRef in sync so the tap handler (closed over on mount) can read it
+  useEffect(() => { layoutRef.current = layout }, [layout])
   const [selected, setSelected] = useState<{ id: string; type: string; label: string } | null>(null)
   const [expanding, setExpanding] = useState(false)
   const navigate = useNavigate()
@@ -79,7 +82,15 @@ export default function GraphExplorer() {
       name,
       animate: true,
       animationDuration: 400,
-      ...(name === 'fcose' ? { quality: 'default', randomize: false } : {}),
+      ...(name === 'fcose' ? {
+        quality: 'default',
+        randomize: false,
+        nodeDimensionsIncludeLabels: true,
+        nodeRepulsion: 6000,
+        idealEdgeLength: 120,
+        edgeElasticity: 0.4,
+        gravity: 0.25,
+      } : {}),
     } as cytoscape.LayoutOptions).run()
   }, [])
 
@@ -104,7 +115,25 @@ export default function GraphExplorer() {
 
         cy.on('tap', 'node', (evt) => {
           const node = evt.target as NodeSingular
-          setSelected({ id: node.id(), type: node.data('type'), label: node.data('label') })
+          const nodeData = { id: node.id(), type: node.data('type'), label: node.data('label') }
+          setSelected(nodeData)
+          // Auto-expand on first tap
+          if (!expandedRef.current.has(node.id())) {
+            const toAdd: cytoscape.ElementDefinition[] = []
+            const edges = data.edges.filter(
+              e => e.data.source === node.id() || e.data.target === node.id()
+            )
+            for (const edge of edges) {
+              const neighbourId = edge.data.source === node.id() ? edge.data.target : edge.data.source
+              const neighbourNode = data.nodes.find(n => n.data.id === neighbourId)
+              if (neighbourNode && !cy.getElementById(neighbourId).length)
+                toAdd.push({ data: neighbourNode.data })
+              if (!cy.getElementById(edge.data.id).length)
+                toAdd.push({ data: edge.data })
+            }
+            if (toAdd.length) { cy.add(toAdd); runLayout(cy, layoutRef.current) }
+            expandedRef.current.add(node.id())
+          }
         })
         cy.on('tap', (evt) => { if (evt.target === cy) setSelected(null) })
 

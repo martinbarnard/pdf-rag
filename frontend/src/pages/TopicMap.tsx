@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import cytoscape from 'cytoscape'
-import type { Core } from 'cytoscape'
+import type { Core, NodeSingular } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
 import { useApi } from '../hooks/useApi'
 import Spinner from '../components/Spinner'
@@ -17,9 +17,22 @@ interface OverviewData {
   edges: Array<{ data: { id: string; source: string; target: string; label: string } }>
 }
 
+const FCOSE_OPTS = {
+  name: 'fcose',
+  animate: true,
+  animationDuration: 400,
+  nodeDimensionsIncludeLabels: true,
+  nodeRepulsion: 5000,
+  idealEdgeLength: 100,
+  edgeElasticity: 0.4,
+  gravity: 0.25,
+} as cytoscape.LayoutOptions
+
 export default function TopicMap() {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
+  const overviewRef = useRef<OverviewData | null>(null)
+  const expandedRef = useRef<Set<string>>(new Set())
   const navigate = useNavigate()
   const { data: overview, loading, error } = useApi<OverviewData>('/api/graph/overview')
   const [selected, setSelected] = useState<Topic | null>(null)
@@ -30,6 +43,9 @@ export default function TopicMap() {
 
   useEffect(() => {
     if (!overview || !containerRef.current) return
+
+    overviewRef.current = overview
+    expandedRef.current = new Set()
 
     const topicNodes = overview.nodes.filter(n => n.data.type === 'Topic')
     const topicIds = new Set(topicNodes.map(n => n.data.id))
@@ -49,18 +65,21 @@ export default function TopicMap() {
             color: '#e5e7eb',
             'text-valign': 'bottom',
             'text-margin-y': 4,
+            'text-max-width': '80px',
+            'text-wrap': 'ellipsis',
             width: 24,
             height: 24,
             'background-color': '#f59e0b',
             'border-width': 0,
           },
         },
+        { selector: 'node[type="Paper"]', style: { 'background-color': '#6366f1' } },
         { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#ffffff' } },
         {
           selector: 'edge',
           style: {
-            'line-color': '#78350f',
-            'target-arrow-color': '#78350f',
+            'line-color': '#4b5563',
+            'target-arrow-color': '#4b5563',
             'target-arrow-shape': 'triangle',
             'arrow-scale': 0.7,
             width: 1.5,
@@ -70,10 +89,30 @@ export default function TopicMap() {
       ] as cytoscape.StylesheetJson,
     })
 
-    cy.layout({ name: 'fcose', animate: true, animationDuration: 400 } as cytoscape.LayoutOptions).run()
+    cy.layout(FCOSE_OPTS).run()
+
     cy.on('tap', 'node', evt => {
-      const node = evt.target
+      const node = evt.target as NodeSingular
       setSelected({ id: node.id(), label: node.data('label') })
+
+      // Auto-expand: add connected papers from overview on first tap
+      if (!expandedRef.current.has(node.id()) && overviewRef.current) {
+        const data = overviewRef.current
+        const toAdd: cytoscape.ElementDefinition[] = []
+        const edges = data.edges.filter(
+          e => e.data.source === node.id() || e.data.target === node.id()
+        )
+        for (const edge of edges) {
+          const neighbourId = edge.data.source === node.id() ? edge.data.target : edge.data.source
+          const neighbourNode = data.nodes.find(n => n.data.id === neighbourId)
+          if (neighbourNode && !cy.getElementById(neighbourId).length)
+            toAdd.push({ data: neighbourNode.data })
+          if (!cy.getElementById(edge.data.id).length)
+            toAdd.push({ data: edge.data })
+        }
+        if (toAdd.length) { cy.add(toAdd); cy.layout(FCOSE_OPTS).run() }
+        expandedRef.current.add(node.id())
+      }
     })
     cy.on('tap', evt => { if (evt.target === cy) setSelected(null) })
 

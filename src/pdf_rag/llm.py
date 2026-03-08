@@ -197,7 +197,16 @@ def _call_local_raw(prompt: str) -> str:
         timeout=30.0,
     )
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+    content: str = resp.json()["choices"][0]["message"]["content"]
+    return _strip_thinking(content)
+
+
+def _strip_thinking(text: str) -> str:
+    """Remove <think>...</think> reasoning blocks produced by Qwen3/DeepSeek-R1."""
+    import re
+    # Remove everything inside <think>...</think> tags (including the tags)
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    return cleaned.strip()
 
 
 def _call_local(context: str, query: str) -> str:
@@ -225,4 +234,5 @@ def _call_local(context: str, query: str) -> str:
         timeout=120.0,
     )
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+    content: str = resp.json()["choices"][0]["message"]["content"]
+    return _strip_thinking(content)
