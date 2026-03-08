@@ -182,6 +182,98 @@ class GraphStore:
             {"aid": citing_id, "bid": cited_id},
         )
 
+    def link_related_topics(self, topic_id_a: str, topic_id_b: str, weight: float = 1.0) -> None:
+        """Create a RELATED_TO edge between two Topic nodes with a weight."""
+        self._conn.execute(
+            """
+            MATCH (a:Topic {id: $aid}), (b:Topic {id: $bid})
+            MERGE (a)-[r:RELATED_TO]->(b)
+            ON CREATE SET r.weight = $w
+            """,
+            {"aid": topic_id_a, "bid": topic_id_b, "w": weight},
+        )
+
+    # ------------------------------------------------------------------
+    # Graph traversal queries
+    # ------------------------------------------------------------------
+
+    def papers_by_author(self, author_id: str) -> list[dict]:
+        """Return all papers authored by the given author."""
+        result = self._conn.execute(
+            """
+            MATCH (a:Author {id: $aid})-[:AUTHORED]->(p:Paper)
+            RETURN p.id, p.title, p.year
+            """,
+            {"aid": author_id},
+        )
+        return self._collect(result, ["id", "title", "year"])
+
+    def papers_by_topic(self, topic_id: str) -> list[dict]:
+        """Return all papers that discuss the given topic."""
+        result = self._conn.execute(
+            """
+            MATCH (p:Paper)-[:DISCUSSES]->(t:Topic {id: $tid})
+            RETURN p.id, p.title, p.year
+            """,
+            {"tid": topic_id},
+        )
+        return self._collect(result, ["id", "title", "year"])
+
+    def related_topics(self, topic_id: str) -> list[dict]:
+        """Return topics related to the given topic, ordered by weight desc."""
+        result = self._conn.execute(
+            """
+            MATCH (a:Topic {id: $tid})-[r:RELATED_TO]->(b:Topic)
+            RETURN b.id, b.canonical_name, r.weight
+            ORDER BY r.weight DESC
+            """,
+            {"tid": topic_id},
+        )
+        return self._collect(result, ["id", "canonical_name", "weight"])
+
+    def coauthor_network(self, author_id: str) -> list[dict]:
+        """Return all co-authors of the given author (authors sharing at least one paper)."""
+        result = self._conn.execute(
+            """
+            MATCH (a:Author {id: $aid})-[:AUTHORED]->(p:Paper)<-[:AUTHORED]-(b:Author)
+            WHERE b.id <> $aid
+            RETURN DISTINCT b.id, b.canonical_name
+            """,
+            {"aid": author_id},
+        )
+        return self._collect(result, ["id", "canonical_name"])
+
+    def citing_papers(self, paper_id: str) -> list[dict]:
+        """Return all papers that cite the given paper."""
+        result = self._conn.execute(
+            """
+            MATCH (citing:Paper)-[:CITES]->(p:Paper {id: $pid})
+            RETURN citing.id, citing.title, citing.year
+            """,
+            {"pid": paper_id},
+        )
+        return self._collect(result, ["id", "title", "year"])
+
+    def cited_papers(self, paper_id: str) -> list[dict]:
+        """Return all papers cited by the given paper."""
+        result = self._conn.execute(
+            """
+            MATCH (p:Paper {id: $pid})-[:CITES]->(cited:Paper)
+            RETURN cited.id, cited.title, cited.year
+            """,
+            {"pid": paper_id},
+        )
+        return self._collect(result, ["id", "title", "year"])
+
+    @staticmethod
+    def _collect(result, keys: list[str]) -> list[dict]:
+        """Convert a kuzu QueryResult into a list of dicts."""
+        rows = []
+        while result.has_next():
+            row = result.get_next()
+            rows.append(dict(zip(keys, row)))
+        return rows
+
     # ------------------------------------------------------------------
     # Vector search
     # ------------------------------------------------------------------

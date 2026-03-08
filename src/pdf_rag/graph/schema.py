@@ -82,9 +82,9 @@ _NODE_TABLES: list[str] = [
 # ---------------------------------------------------------------------------
 
 _EDGE_TABLES: list[str] = [
-    "CREATE REL TABLE IF NOT EXISTS AUTHORED        (FROM Author       TO Paper,       ONE_MANY)",
-    "CREATE REL TABLE IF NOT EXISTS AFFILIATED_WITH (FROM Author       TO Institution, MANY_MANY)",
-    "CREATE REL TABLE IF NOT EXISTS PUBLISHED_IN    (FROM Paper        TO Venue,       MANY_ONE)",
+    "CREATE REL TABLE IF NOT EXISTS AUTHORED        (FROM Author TO Paper,        MANY_MANY)",
+    "CREATE REL TABLE IF NOT EXISTS AFFILIATED_WITH (FROM Author TO Institution,  MANY_MANY)",
+    "CREATE REL TABLE IF NOT EXISTS PUBLISHED_IN    (FROM Paper  TO Venue,        MANY_ONE)",
     "CREATE REL TABLE IF NOT EXISTS DISCUSSES       (FROM Paper        TO Topic,       MANY_MANY)",
     "CREATE REL TABLE IF NOT EXISTS CITES           (FROM Paper        TO Paper,       MANY_MANY)",
     "CREATE REL TABLE IF NOT EXISTS HAS_CHUNK       (FROM Paper        TO Chunk,       ONE_MANY)",
