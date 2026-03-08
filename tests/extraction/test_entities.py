@@ -30,6 +30,15 @@ class TestEntityExtractorInit:
         assert len(ENTITY_TYPES) > 0
         assert all(isinstance(t, str) for t in ENTITY_TYPES)
 
+    def test_device_param_accepted(self) -> None:
+        ex = EntityExtractor(model_name=TEST_MODEL, device="cpu")
+        assert ex.device == "cpu"
+
+    def test_default_device_from_config(self) -> None:
+        from pdf_rag.config import GLINER_DEVICE
+        ex = EntityExtractor()
+        assert ex.device == GLINER_DEVICE
+
 
 class TestEntityExtractorExtract:
     @pytest.fixture(scope="class")

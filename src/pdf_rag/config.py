@@ -23,3 +23,9 @@ CHUNK_OVERLAP: int = 64
 # Embedding dimension — must match the chosen model output size.
 # all-MiniLM-L6-v2: 384, Qwen3-Embedding-0.6B: 1024
 EMBEDDING_DIM: int = 1024
+
+# Device placement for ML models.
+# GLiNER defaults to CPU to avoid competing with the embedding model for VRAM.
+# Set EMBEDDING_DEVICE="cpu" if GPU memory is too constrained for the embedding model.
+EMBEDDING_DEVICE: str = "cuda"   # "cuda" or "cpu"
+GLINER_DEVICE: str = "cpu"       # "cuda" or "cpu"

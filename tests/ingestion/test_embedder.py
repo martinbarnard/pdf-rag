@@ -24,6 +24,20 @@ class TestEmbedderInit:
         emb = Embedder(model_name=TEST_MODEL)
         assert emb._model is None
 
+    def test_device_param_accepted(self) -> None:
+        emb = Embedder(model_name=TEST_MODEL, device="cpu")
+        assert emb.device == "cpu"
+
+    def test_default_device_from_config(self) -> None:
+        from pdf_rag.config import EMBEDDING_DEVICE
+        emb = Embedder(model_name=TEST_MODEL)
+        assert emb.device == EMBEDDING_DEVICE
+
+    def test_model_loads_on_specified_device(self) -> None:
+        emb = Embedder(model_name=TEST_MODEL, device="cpu")
+        emb.encode(["test"])
+        assert str(emb._model.device) == "cpu"
+
 
 class TestEmbedderEncode:
     @pytest.fixture

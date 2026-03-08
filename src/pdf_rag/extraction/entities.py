@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pdf_rag.config import DEFAULT_GLINER_MODEL
+from pdf_rag.config import DEFAULT_GLINER_MODEL, GLINER_DEVICE
 
 # Entity types recognised by the extractor.
 ENTITY_TYPES: list[str] = [
@@ -18,13 +18,14 @@ ENTITY_TYPES: list[str] = [
 class EntityExtractor:
     """Wraps a GLiNER model for named-entity recognition. Lazy-loads the model."""
 
-    def __init__(self, model_name: str = DEFAULT_GLINER_MODEL) -> None:
+    def __init__(self, model_name: str = DEFAULT_GLINER_MODEL, device: str | None = None) -> None:
         self.model_name = model_name
+        self.device = device if device is not None else GLINER_DEVICE
         self._model = None
 
     def _load(self) -> None:
         from gliner import GLiNER
-        self._model = GLiNER.from_pretrained(self.model_name)
+        self._model = GLiNER.from_pretrained(self.model_name).to(self.device)
 
     def extract(
         self,

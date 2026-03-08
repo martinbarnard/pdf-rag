@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-from pdf_rag.config import DEFAULT_EMBEDDING_MODEL
+from pdf_rag.config import DEFAULT_EMBEDDING_MODEL, EMBEDDING_DEVICE
 
 
 class Embedder:
     """Wraps a sentence-transformers model for encoding text. Lazy-loads the model."""
 
-    def __init__(self, model_name: str = DEFAULT_EMBEDDING_MODEL) -> None:
+    def __init__(self, model_name: str = DEFAULT_EMBEDDING_MODEL, device: str | None = None) -> None:
         self.model_name = model_name
+        self.device = device if device is not None else EMBEDDING_DEVICE
         self._model = None
 
     def _load(self) -> None:
         from sentence_transformers import SentenceTransformer
-        self._model = SentenceTransformer(self.model_name)
+        self._model = SentenceTransformer(self.model_name, device=self.device)
 
     def encode(self, texts: list[str]) -> list[list[float]]:
         """Return embeddings for a list of texts.
