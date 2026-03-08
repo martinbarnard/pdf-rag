@@ -15,9 +15,9 @@ const NODE_COLOURS: Record<string, string> = {
   Paper:  '#6366f1',
   Author: '#22c55e',
   Topic:  '#f59e0b',
-  GhostPaper:   '#818cf8',
-  GhostAuthor:  '#4ade80',
-  GhostTopic:   '#fbbf24',
+  GhostPaper:  '#818cf8',
+  GhostAuthor: '#4ade80',
+  GhostTopic:  '#fbbf24',
 }
 
 interface CyNode { data: { id: string; label: string; type: string } }
@@ -42,40 +42,37 @@ const LAYOUTS: { key: Layout; label: string }[] = [
   { key: 'circle',       label: 'Circle' },
 ]
 
-// Ghost node IDs use a prefix so they never collide with kuzu IDs
-const ghostPaperId  = (arxiv_id: string) => `arxiv:${arxiv_id}`
-const ghostAuthorId = (name: string)     => `ghost-author:${name}`
-const ghostTopicId  = (cat: string)      => `ghost-topic:${cat}`
+// Ghost node IDs must not contain colons — cytoscape uses IDs as CSS selectors
+// internally and colons are invalid there.
+const ghostPaperId  = (arxiv_id: string) => `arxiv__${arxiv_id}`
+const ghostAuthorId = (name: string)     => `ghost_author__${name.replace(/\s+/g, '_')}`
+const ghostTopicId  = (cat: string)      => `ghost_topic__${cat}`
 
 export default function GraphExplorer() {
   const containerRef = useRef<HTMLDivElement>(null)
-  const cyRef = useRef<Core | null>(null)
-  const overviewRef = useRef<OverviewData | null>(null)
-  const expandedRef = useRef<Set<string>>(new Set())
-  const layoutRef = useRef<Layout>('fcose')
-
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [layout, setLayout] = useState<Layout>('fcose')
-  useEffect(() => { layoutRef.current = layout }, [layout])
-
-  // Selected real or ghost node
-  const [selected, setSelected] = useState<{ id: string; type: string; label: string } | null>(null)
-  // Ghost paper detail (populated when a GhostPaper is selected)
-  const [ghostDetail, setGhostDetail] = useState<ArxivResult | null>(null)
+  const cyRef        = useRef<Core | null>(null)
+  const overviewRef  = useRef<OverviewData | null>(null)
+  const expandedRef  = useRef<Set<string>>(new Set())
+  const layoutRef    = useRef<Layout>('fcose')
+  // Map ghostPaperId → ArxivResult for the detail panel
   const ghostResultsRef = useRef<Map<string, ArxivResult>>(new Map())
 
-  const [expanding, setExpanding] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState<string | null>(null)
+  const [layout,  setLayout]  = useState<Layout>('fcose')
+  useEffect(() => { layoutRef.current = layout }, [layout])
 
-  // arXiv search panel state
-  const [arxivPanelOpen, setArxivPanelOpen] = useState(false)
-  const [arxivQuery, setArxivQuery] = useState('')
-  const [arxivSearching, setArxivSearching] = useState(false)
-  const [arxivResults, setArxivResults] = useState<ArxivResult[]>([])
-  const [arxivAttribution, setArxivAttribution] = useState('')
-  const [arxivError, setArxivError] = useState<string | null>(null)
+  const [selected,    setSelected]    = useState<{ id: string; type: string; label: string } | null>(null)
+  const [ghostDetail, setGhostDetail] = useState<ArxivResult | null>(null)
+  const [expanding,   setExpanding]   = useState(false)
 
-  // Ingest state per arxiv_id
+  const [arxivPanelOpen,  setArxivPanelOpen]  = useState(false)
+  const [arxivQuery,      setArxivQuery]      = useState('')
+  const [arxivSearching,  setArxivSearching]  = useState(false)
+  const [arxivResults,    setArxivResults]    = useState<ArxivResult[]>([])
+  const [arxivAttribution,setArxivAttribution]= useState('')
+  const [arxivError,      setArxivError]      = useState<string | null>(null)
+
   const [ingestState, setIngestState] = useState<Record<string, 'idle' | 'ingesting' | 'done' | 'error'>>({})
 
   const navigate = useNavigate()
@@ -97,7 +94,6 @@ export default function GraphExplorer() {
     } as cytoscape.LayoutOptions).run()
   }, [])
 
-  // Drop arXiv results as ghost nodes into the graph
   const addGhostResults = useCallback((results: ArxivResult[]) => {
     const cy = cyRef.current
     if (!cy) return
@@ -105,36 +101,29 @@ export default function GraphExplorer() {
     const toAdd: cytoscape.ElementDefinition[] = []
 
     for (const r of results) {
-      ghostResultsRef.current.set(ghostPaperId(r.arxiv_id), r)
-
-      // Ghost paper node
       const paperId = ghostPaperId(r.arxiv_id)
+      ghostResultsRef.current.set(paperId, r)
+
       if (!cy.getElementById(paperId).length) {
-        toAdd.push({ data: { id: paperId, label: r.title, type: 'GhostPaper', arxiv_id: r.arxiv_id } })
+        toAdd.push({ data: { id: paperId, label: r.title, type: 'GhostPaper' } })
       }
 
-      // Ghost author nodes + edges
       for (const author of r.authors.slice(0, 3)) {
         const authorId = ghostAuthorId(author)
-        if (!cy.getElementById(authorId).length) {
+        if (!cy.getElementById(authorId).length)
           toAdd.push({ data: { id: authorId, label: author, type: 'GhostAuthor' } })
-        }
-        const edgeId = `ghost-au-${paperId}-${authorId}`
-        if (!cy.getElementById(edgeId).length) {
+        const edgeId = `ghost_au__${paperId}__${authorId}`
+        if (!cy.getElementById(edgeId).length)
           toAdd.push({ data: { id: edgeId, source: authorId, target: paperId, ghost: 'true' } })
-        }
       }
 
-      // Ghost topic nodes (arXiv categories) + edges
       for (const cat of r.categories.slice(0, 3)) {
         const topicId = ghostTopicId(cat)
-        if (!cy.getElementById(topicId).length) {
+        if (!cy.getElementById(topicId).length)
           toAdd.push({ data: { id: topicId, label: cat, type: 'GhostTopic' } })
-        }
-        const edgeId = `ghost-tp-${paperId}-${topicId}`
-        if (!cy.getElementById(edgeId).length) {
+        const edgeId = `ghost_tp__${paperId}__${topicId}`
+        if (!cy.getElementById(edgeId).length)
           toAdd.push({ data: { id: edgeId, source: paperId, target: topicId, ghost: 'true' } })
-        }
       }
     }
 
@@ -144,7 +133,6 @@ export default function GraphExplorer() {
     }
   }, [runLayout])
 
-  // arXiv keyword search
   const searchArxiv = useCallback(async (terms: string[], author = '') => {
     setArxivSearching(true)
     setArxivError(null)
@@ -166,7 +154,6 @@ export default function GraphExplorer() {
     }
   }, [addGhostResults])
 
-  // arXiv search from paper's /related-arxiv endpoint
   const searchRelatedArxiv = useCallback(async (paperId: string) => {
     setArxivSearching(true)
     setArxivError(null)
@@ -185,7 +172,6 @@ export default function GraphExplorer() {
     }
   }, [addGhostResults])
 
-  // Ingest a ghost paper
   const ingestGhost = useCallback(async (arxiv_id: string) => {
     setIngestState(s => ({ ...s, [arxiv_id]: 'ingesting' }))
     try {
@@ -197,24 +183,21 @@ export default function GraphExplorer() {
       if (!resp.ok) throw new Error(`${resp.status}`)
       const { job_id } = await resp.json()
 
-      // Poll for completion
       const poll = async () => {
         const r = await fetch(`/api/ingest/jobs/${job_id}`)
         if (!r.ok) return
         const job = await r.json()
         if (job.status === 'done') {
           setIngestState(s => ({ ...s, [arxiv_id]: 'done' }))
-          // Promote ghost node to real node in the graph
           const cy = cyRef.current
           if (cy && job.paper_id) {
             const ghostId = ghostPaperId(arxiv_id)
             const ghostNode = cy.getElementById(ghostId)
             if (ghostNode.length) {
-              // Remove ghost node + its ghost edges, re-fetch overview to get real node
-              cy.remove(cy.edges(`[source="${ghostId}"], [target="${ghostId}"]`))
+              cy.remove(cy.edges(`[source = "${ghostId}"]`))
+              cy.remove(cy.edges(`[target = "${ghostId}"]`))
               cy.remove(ghostNode)
             }
-            // Reload overview so the new paper appears
             const ovResp = await fetch('/api/graph/overview')
             if (ovResp.ok) {
               const newData: OverviewData = await ovResp.json()
@@ -238,7 +221,6 @@ export default function GraphExplorer() {
     }
   }, [runLayout])
 
-  // Seed graph with paper nodes only
   useEffect(() => {
     if (!containerRef.current) return
     setLoading(true)
@@ -260,45 +242,45 @@ export default function GraphExplorer() {
 
         cy.on('tap', 'node', (evt) => {
           const node = evt.target as NodeSingular
-          const nodeData = { id: node.id(), type: node.data('type'), label: node.data('label') }
-          setSelected(nodeData)
+          const id    = node.id()
+          const type  = node.data('type') as string
+          const label = node.data('label') as string
+          setSelected({ id, type, label })
 
-          // Ghost paper: show its arXiv detail
-          if (nodeData.type === 'GhostPaper') {
-            const detail = ghostResultsRef.current.get(nodeData.id)
-            setGhostDetail(detail ?? null)
+          if (type === 'GhostPaper') {
+            // Look up the stored result by node ID (keyed as ghostPaperId(arxiv_id))
+            const detail = ghostResultsRef.current.get(id) ?? null
+            setGhostDetail(detail)
             return
           }
           setGhostDetail(null)
 
           // Auto-expand real nodes on first tap
-          if (!expandedRef.current.has(node.id())) {
+          if (!expandedRef.current.has(id)) {
             const toAdd: cytoscape.ElementDefinition[] = []
-            const edges = data.edges.filter(
-              e => e.data.source === node.id() || e.data.target === node.id()
-            )
+            const edges = data.edges.filter(e => e.data.source === id || e.data.target === id)
             for (const edge of edges) {
-              const neighbourId = edge.data.source === node.id() ? edge.data.target : edge.data.source
-              const neighbourNode = data.nodes.find(n => n.data.id === neighbourId)
-              if (neighbourNode && !cy.getElementById(neighbourId).length)
-                toAdd.push({ data: neighbourNode.data })
+              const nbId = edge.data.source === id ? edge.data.target : edge.data.source
+              const nbNode = data.nodes.find(n => n.data.id === nbId)
+              if (nbNode && !cy.getElementById(nbId).length)
+                toAdd.push({ data: nbNode.data })
               if (!cy.getElementById(edge.data.id).length)
                 toAdd.push({ data: edge.data })
             }
             if (toAdd.length) { cy.add(toAdd); runLayout(cy, layoutRef.current) }
-            expandedRef.current.add(node.id())
+            expandedRef.current.add(id)
           }
         })
+
         cy.on('tap', (evt) => {
           if (evt.target === cy) { setSelected(null); setGhostDetail(null) }
         })
 
-        // Context menu via cxtmenu or right-click (using cxttap)
         cy.on('cxttap', 'node', (evt) => {
-          const node = evt.target as NodeSingular
-          const type = node.data('type')
-          const label = node.data('label')
-          const id = node.id()
+          const node  = evt.target as NodeSingular
+          const type  = node.data('type') as string
+          const label = node.data('label') as string
+          const id    = node.id()
 
           if (type === 'Topic' || type === 'GhostTopic') {
             setArxivPanelOpen(true)
@@ -329,25 +311,22 @@ export default function GraphExplorer() {
   const expandNode = useCallback(async () => {
     if (!selected || !cyRef.current || !overviewRef.current) return
     if (expandedRef.current.has(selected.id)) return
-
     setExpanding(true)
     try {
-      const cy = cyRef.current
+      const cy   = cyRef.current
       const data = overviewRef.current
       const toAdd: cytoscape.ElementDefinition[] = []
-
       const connectedEdges = data.edges.filter(
         e => e.data.source === selected.id || e.data.target === selected.id
       )
       for (const edge of connectedEdges) {
-        const neighbourId = edge.data.source === selected.id ? edge.data.target : edge.data.source
-        const neighbourNode = data.nodes.find(n => n.data.id === neighbourId)
-        if (neighbourNode && !cy.getElementById(neighbourId).length)
-          toAdd.push({ data: neighbourNode.data })
+        const nbId = edge.data.source === selected.id ? edge.data.target : edge.data.source
+        const nbNode = data.nodes.find(n => n.data.id === nbId)
+        if (nbNode && !cy.getElementById(nbId).length)
+          toAdd.push({ data: nbNode.data })
         if (!cy.getElementById(edge.data.id).length)
           toAdd.push({ data: edge.data })
       }
-
       if (toAdd.length) { cy.add(toAdd); runLayout(cy, layout) }
       expandedRef.current.add(selected.id)
     } finally {
@@ -363,7 +342,7 @@ export default function GraphExplorer() {
   }, [selected, navigate])
 
   const isExpanded = selected ? expandedRef.current.has(selected.id) : false
-  const isGhost = selected?.type?.startsWith('Ghost') ?? false
+  const isGhost    = selected?.type?.startsWith('Ghost') ?? false
   const isRealNode = selected && !isGhost
 
   return (
@@ -381,10 +360,11 @@ export default function GraphExplorer() {
         <div className="w-px h-5 bg-gray-700" />
         <span className="text-xs text-gray-500">Click to expand · Right-click to search arXiv</span>
 
-        {/* Manual arXiv keyword search */}
         <div className="ml-auto flex items-center gap-2">
-          <form onSubmit={e => { e.preventDefault(); if (arxivQuery.trim()) { setArxivPanelOpen(true); searchArxiv(arxivQuery.trim().split(/\s+/)) } }}
-            className="flex items-center gap-1">
+          <form onSubmit={e => {
+            e.preventDefault()
+            if (arxivQuery.trim()) { setArxivPanelOpen(true); searchArxiv(arxivQuery.trim().split(/\s+/)) }
+          }} className="flex items-center gap-1">
             <input
               value={arxivQuery}
               onChange={e => setArxivQuery(e.target.value)}
@@ -412,65 +392,75 @@ export default function GraphExplorer() {
         {error && <ErrorBox message={error} />}
         <div ref={containerRef} className="flex-1 bg-gray-950" />
 
-        {/* Node detail panel (real or ghost) */}
+        {/* Node detail panel */}
         {selected && (
           <div className="w-64 shrink-0 bg-gray-900 border-l border-gray-800 p-4 flex flex-col gap-3 overflow-y-auto">
             <div className="flex items-start justify-between">
               <div>
                 <span className="inline-block px-2 py-0.5 rounded text-xs font-medium mb-1"
                   style={{ background: (NODE_COLOURS[selected.type] ?? '#6b7280') + '33', color: NODE_COLOURS[selected.type] ?? '#e5e7eb' }}>
-                  {selected.type.replace('Ghost', '').toLowerCase() === selected.type.toLowerCase()
-                    ? selected.type
-                    : `arXiv ${selected.type.replace('Ghost', '')}`}
+                  {isGhost ? `arXiv ${selected.type.replace('Ghost', '')}` : selected.type}
                 </span>
                 <p className="text-sm font-medium text-gray-100 leading-snug">{selected.label}</p>
               </div>
-              <button onClick={() => { setSelected(null); setGhostDetail(null) }} className="text-gray-600 hover:text-gray-300"><X size={14} /></button>
+              <button onClick={() => { setSelected(null); setGhostDetail(null) }}
+                className="text-gray-600 hover:text-gray-300"><X size={14} /></button>
             </div>
 
-            {/* Ghost paper detail */}
-            {ghostDetail && (
-              <>
-                <p className="text-xs text-gray-400 leading-relaxed line-clamp-4">{ghostDetail.abstract}</p>
-                <div className="text-xs text-gray-500 space-y-0.5">
-                  <p>{ghostDetail.authors.slice(0, 3).join(', ')}{ghostDetail.authors.length > 3 ? ' et al.' : ''}</p>
-                  <p>{ghostDetail.published.slice(0, 4)} · {ghostDetail.categories.slice(0, 2).join(', ')}</p>
-                </div>
+            {/* Ghost paper: show abstract, authors, ingest button */}
+            {selected.type === 'GhostPaper' && (
+              ghostDetail ? (
+                <>
+                  <p className="text-xs text-gray-400 leading-relaxed line-clamp-4">{ghostDetail.abstract}</p>
+                  <div className="text-xs text-gray-500 space-y-0.5">
+                    <p>{ghostDetail.authors.slice(0, 3).join(', ')}{ghostDetail.authors.length > 3 ? ' et al.' : ''}</p>
+                    <p>{ghostDetail.published.slice(0, 4)} · {ghostDetail.categories.slice(0, 2).join(', ')}</p>
+                  </div>
+                  {(() => {
+                    const state = ingestState[ghostDetail.arxiv_id] ?? 'idle'
+                    return state === 'done' ? (
+                      <p className="text-xs text-green-400 text-center">Ingested ✓</p>
+                    ) : state === 'error' ? (
+                      <p className="text-xs text-red-400 text-center">Ingest failed</p>
+                    ) : (
+                      <button
+                        onClick={() => ingestGhost(ghostDetail.arxiv_id)}
+                        disabled={state === 'ingesting'}
+                        className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-sm text-white transition-colors">
+                        {state === 'ingesting'
+                          ? <><RefreshCw size={13} className="animate-spin" /> Ingesting…</>
+                          : <><Download size={13} /> Ingest paper</>}
+                      </button>
+                    )
+                  })()}
+                  <a href={ghostDetail.pdf_url} target="_blank" rel="noreferrer"
+                    className="flex items-center justify-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
+                    <ExternalLink size={11} /> View on arXiv
+                  </a>
+                </>
+              ) : (
+                <p className="text-xs text-gray-500 italic text-center">Detail unavailable</p>
+              )
+            )}
 
-                {ingestState[ghostDetail.arxiv_id] === 'done' ? (
-                  <p className="text-xs text-green-400 text-center">Ingested ✓</p>
-                ) : ingestState[ghostDetail.arxiv_id] === 'error' ? (
-                  <p className="text-xs text-red-400 text-center">Ingest failed</p>
-                ) : (
-                  <button
-                    onClick={() => ingestGhost(ghostDetail.arxiv_id)}
-                    disabled={ingestState[ghostDetail.arxiv_id] === 'ingesting'}
-                    className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-sm text-white transition-colors">
-                    {ingestState[ghostDetail.arxiv_id] === 'ingesting'
-                      ? <><RefreshCw size={13} className="animate-spin" /> Ingesting…</>
-                      : <><Download size={13} /> Ingest paper</>}
-                  </button>
-                )}
-                <a href={ghostDetail.pdf_url} target="_blank" rel="noreferrer"
-                  className="flex items-center justify-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
-                  <ExternalLink size={11} /> View on arXiv
-                </a>
-              </>
+            {/* Ghost author/topic: just a label */}
+            {isGhost && selected.type !== 'GhostPaper' && (
+              <p className="text-xs text-gray-500 text-center italic">arXiv metadata node</p>
             )}
 
             {/* Real node actions */}
             {isRealNode && (
               <>
-                {!isExpanded && (
+                {!isExpanded ? (
                   <button onClick={expandNode} disabled={expanding}
                     className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-sm text-gray-200 transition-colors">
                     {expanding ? <RefreshCw size={13} className="animate-spin" /> : <ChevronDown size={13} />}
                     Expand neighbours
                   </button>
+                ) : (
+                  <p className="text-xs text-gray-600 text-center">Neighbours shown</p>
                 )}
-                {isExpanded && <p className="text-xs text-gray-600 text-center">Neighbours shown</p>}
 
-                {/* arXiv search shortcut */}
                 {(selected.type === 'Topic' || selected.type === 'Author' || selected.type === 'Paper') && (
                   <button
                     onClick={() => {
@@ -496,11 +486,6 @@ export default function GraphExplorer() {
                 </button>
               </>
             )}
-
-            {/* Ghost non-paper: just a label, no actions */}
-            {isGhost && !ghostDetail && (
-              <p className="text-xs text-gray-500 text-center italic">arXiv metadata node</p>
-            )}
           </div>
         )}
 
@@ -509,7 +494,9 @@ export default function GraphExplorer() {
           <div className="w-80 shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col overflow-hidden">
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 shrink-0">
               <span className="text-sm font-medium text-gray-200">arXiv results</span>
-              <button onClick={() => setArxivPanelOpen(false)} className="text-gray-600 hover:text-gray-300"><X size={14} /></button>
+              <button onClick={() => setArxivPanelOpen(false)} className="text-gray-600 hover:text-gray-300">
+                <X size={14} />
+              </button>
             </div>
 
             {arxivSearching && (
@@ -560,7 +547,9 @@ export default function GraphExplorer() {
             )}
 
             {arxivAttribution && (
-              <p className="px-3 py-2 text-xs text-gray-600 border-t border-gray-800 shrink-0">{arxivAttribution}</p>
+              <p className="px-3 py-2 text-xs text-gray-600 border-t border-gray-800 shrink-0">
+                {arxivAttribution}
+              </p>
             )}
           </div>
         )}
