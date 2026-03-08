@@ -130,6 +130,17 @@ def _call_anthropic(context: str, query: str) -> str:
     return message.content[0].text
 
 
+_TITLE_SYSTEM = (
+    "You output only the requested text — nothing else. "
+    "No preamble, no explanation, no punctuation around the answer."
+)
+
+_TITLE_PROMPT = (
+    "Write a concise title (10 words or fewer) for this academic excerpt. "
+    "Output the title only.\n\nExcerpt:\n{excerpt}"
+)
+
+
 def generate_title(text: str, backend: str | None = None, fallback: str = "Untitled") -> str:
     """Generate a short semantic title from document text using the LLM.
 
@@ -144,26 +155,24 @@ def generate_title(text: str, backend: str | None = None, fallback: str = "Untit
     if not text or not text.strip():
         return fallback
 
-    prompt = (
-        "Write a concise, descriptive title (10 words or fewer) for the following "
-        "academic document excerpt. Return only the title — no quotes, no explanation.\n\n"
-        f"Excerpt:\n{text[:600]}"
-    )
+    prompt = _TITLE_PROMPT.format(excerpt=text[:600])
     resolved = backend if backend is not None else LLM_BACKEND
     try:
         if resolved == "anthropic":
             raw = _call_anthropic_raw(prompt)
         elif resolved == "local":
-            raw = _call_local_raw(prompt)
+            raw = _call_local_raw(prompt, system=_TITLE_SYSTEM)
         else:  # auto
             if probe_local():
                 try:
-                    raw = _call_local_raw(prompt)
+                    raw = _call_local_raw(prompt, system=_TITLE_SYSTEM)
                 except Exception:
                     raw = _call_anthropic_raw(prompt)
             else:
                 raw = _call_anthropic_raw(prompt)
-        return raw.strip().strip('"').strip("'").strip()
+        # Some models narrate before answering — take the last non-empty line
+        lines = [l.strip().strip('"').strip("'") for l in raw.splitlines() if l.strip()]
+        return lines[-1] if lines else fallback
     except Exception:
         return fallback
 
@@ -181,16 +190,21 @@ def _call_anthropic_raw(prompt: str) -> str:
     return message.content[0].text
 
 
-def _call_local_raw(prompt: str) -> str:
+def _call_local_raw(prompt: str, system: str | None = None) -> str:
     """Call local OpenAI-compatible server with a single user prompt."""
     import httpx
+
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
 
     url = LOCAL_LLM_BASE_URL.rstrip("/") + "/v1/chat/completions"
     resp = httpx.post(
         url,
         json={
             "model": LOCAL_LLM_MODEL,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": messages,
             "max_tokens": 64,
             "temperature": 0.2,
         },
@@ -202,11 +216,16 @@ def _call_local_raw(prompt: str) -> str:
 
 
 def _strip_thinking(text: str) -> str:
-    """Remove <think>...</think> reasoning blocks produced by Qwen3/DeepSeek-R1."""
+    """Remove <think>...</think> reasoning blocks produced by Qwen3/DeepSeek-R1.
+
+    Also strips any leading prose that precedes the actual answer — some models
+    narrate their reasoning in plain text before giving the result. We take the
+    last non-empty line as the answer when the text contains multiple lines.
+    """
     import re
-    # Remove everything inside <think>...</think> tags (including the tags)
-    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
-    return cleaned.strip()
+    # Remove tagged thinking blocks
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    return cleaned
 
 
 def _call_local(context: str, query: str) -> str:
