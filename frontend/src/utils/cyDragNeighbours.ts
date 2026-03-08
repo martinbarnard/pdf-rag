@@ -144,6 +144,7 @@ export function attachDragNeighbours(cy: Core): () => void {
           name: 'fcose',
           animate: true,
           animationDuration: 350,
+          fit: false,        // never auto-zoom — user controls viewport
           quality: 'proof',
           randomize: false,
           nodeDimensionsIncludeLabels: true,

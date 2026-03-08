@@ -155,6 +155,7 @@ export default function GraphExplorer() {
         name: 'fcose',
         animate: true,
         animationDuration: 450,
+        fit: false,        // never auto-zoom — user controls viewport
         quality: 'proof',
         randomize: false,
         nodeDimensionsIncludeLabels: true,
