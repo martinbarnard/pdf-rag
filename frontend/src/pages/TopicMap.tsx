@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import cytoscape from 'cytoscape'
 import type { Core } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
@@ -19,6 +20,7 @@ interface OverviewData {
 export default function TopicMap() {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
+  const navigate = useNavigate()
   const { data: overview, loading, error } = useApi<OverviewData>('/api/graph/overview')
   const [selected, setSelected] = useState<Topic | null>(null)
   const { data: related } = useApi<Related[]>(
@@ -69,7 +71,10 @@ export default function TopicMap() {
     })
 
     cy.layout({ name: 'fcose', animate: true, animationDuration: 400 } as cytoscape.LayoutOptions).run()
-    cy.on('tap', 'node', evt => setSelected({ id: evt.target.id(), label: evt.target.data('label') }))
+    cy.on('tap', 'node', evt => {
+      const node = evt.target
+      setSelected({ id: node.id(), label: node.data('label') })
+    })
     cy.on('tap', evt => { if (evt.target === cy) setSelected(null) })
 
     cyRef.current = cy
@@ -90,6 +95,11 @@ export default function TopicMap() {
             <Tag size={14} className="text-amber-400" />
             <h3 className="text-sm font-semibold text-gray-100">{selected.label}</h3>
           </div>
+          <button
+            onClick={() => navigate(`/topics/${selected.id}`)}
+            className="w-full mb-3 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 text-sm text-white transition-colors text-center">
+            Open topic graph →
+          </button>
           <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Related topics</h4>
           {!related || related.length === 0
             ? <p className="text-xs text-gray-600">No related topics.</p>

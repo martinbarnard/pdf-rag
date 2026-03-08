@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import cytoscape from 'cytoscape'
 import type { Core, NodeSingular } from 'cytoscape'
 import fcose from 'cytoscape-fcose'
-import { LayoutGrid, Share2, RefreshCw, X } from 'lucide-react'
+import { LayoutGrid, RefreshCw, X, ChevronDown } from 'lucide-react'
 import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
 
@@ -24,63 +25,54 @@ const LAYOUTS: { key: Layout; label: string }[] = [
   { key: 'breadthfirst', label: 'Tree'   },
   { key: 'circle',       label: 'Circle' },
 ]
-const NODE_TYPES = ['Paper', 'Author', 'Topic']
 
-function makeStylesheet(hidden: Set<string>): cytoscape.StylesheetJson {
-  const base: cytoscape.StylesheetStyle[] = [
-    {
-      selector: 'node',
-      style: {
-        label: 'data(label)',
-        'font-size': 10,
-        color: '#e5e7eb',
-        'text-valign': 'bottom',
-        'text-margin-y': 4,
-        'text-max-width': '80px',
-        'text-wrap': 'ellipsis',
-        width: 28,
-        height: 28,
-        'background-color': '#6b7280',
-        'border-width': 0,
-      },
+const STYLESHEET: cytoscape.StylesheetJson = [
+  {
+    selector: 'node',
+    style: {
+      label: 'data(label)',
+      'font-size': 10,
+      color: '#e5e7eb',
+      'text-valign': 'bottom',
+      'text-margin-y': 4,
+      'text-max-width': '80px',
+      'text-wrap': 'ellipsis',
+      width: 28,
+      height: 28,
+      'background-color': '#6b7280',
+      'border-width': 0,
     },
-    { selector: 'node[type="Paper"]',  style: { 'background-color': '#6366f1' } },
-    { selector: 'node[type="Author"]', style: { 'background-color': '#22c55e' } },
-    { selector: 'node[type="Topic"]',  style: { 'background-color': '#f59e0b' } },
-    {
-      selector: 'node:selected',
-      style: { 'border-width': 3, 'border-color': '#ffffff' },
+  },
+  { selector: 'node[type="Paper"]',  style: { 'background-color': '#6366f1' } },
+  { selector: 'node[type="Author"]', style: { 'background-color': '#22c55e' } },
+  { selector: 'node[type="Topic"]',  style: { 'background-color': '#f59e0b' } },
+  { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#ffffff' } },
+  {
+    selector: 'edge',
+    style: {
+      'line-color': '#4b5563',
+      'target-arrow-color': '#4b5563',
+      'target-arrow-shape': 'triangle',
+      'arrow-scale': 0.8,
+      width: 1.5,
+      'curve-style': 'bezier',
     },
-    {
-      selector: 'edge',
-      style: {
-        'line-color': '#4b5563',
-        'target-arrow-color': '#4b5563',
-        'target-arrow-shape': 'triangle',
-        'arrow-scale': 0.8,
-        width: 1.5,
-        'curve-style': 'bezier',
-        'font-size': 8,
-        color: '#6b7280',
-      },
-    },
-  ]
-  const filters: cytoscape.StylesheetStyle[] = Array.from(hidden).map(type => ({
-    selector: `node[type="${type}"]`,
-    style: { display: 'none' },
-  }))
-  return [...base, ...filters]
-}
+  },
+]
 
 export default function GraphExplorer() {
   const containerRef = useRef<HTMLDivElement>(null)
   const cyRef = useRef<Core | null>(null)
+  // full overview kept in memory for edge lookups when expanding
+  const overviewRef = useRef<OverviewData | null>(null)
+  const expandedRef = useRef<Set<string>>(new Set())
+
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [layout, setLayout] = useState<Layout>('fcose')
-  const [hidden, setHidden] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<{ id: string; type: string; label: string } | null>(null)
   const [expanding, setExpanding] = useState(false)
+  const navigate = useNavigate()
 
   const runLayout = useCallback((cy: Core, name: Layout) => {
     cy.layout({
@@ -91,6 +83,7 @@ export default function GraphExplorer() {
     } as cytoscape.LayoutOptions).run()
   }, [])
 
+  // Seed graph with paper nodes only
   useEffect(() => {
     if (!containerRef.current) return
     setLoading(true)
@@ -98,10 +91,14 @@ export default function GraphExplorer() {
     fetch('/api/graph/overview')
       .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json() })
       .then((data: OverviewData) => {
+        overviewRef.current = data
+        expandedRef.current = new Set()
+
+        const paperNodes = data.nodes.filter(n => n.data.type === 'Paper')
         const cy = cytoscape({
           container: containerRef.current!,
-          elements: [...data.nodes, ...data.edges],
-          style: makeStylesheet(new Set()),
+          elements: paperNodes,
+          style: STYLESHEET,
         })
         cyRef.current = cy
 
@@ -123,41 +120,63 @@ export default function GraphExplorer() {
     if (cyRef.current) runLayout(cyRef.current, layout)
   }, [layout, runLayout])
 
-  useEffect(() => {
-    cyRef.current?.style(makeStylesheet(hidden))
-  }, [hidden])
+  // Expand a paper node to show its authors + topics (and edges from overview)
+  const expandNode = useCallback(async () => {
+    if (!selected || !cyRef.current || !overviewRef.current) return
+    if (expandedRef.current.has(selected.id)) return  // already expanded
 
-  const toggleType = (type: string) =>
-    setHidden(prev => { const n = new Set(prev); n.has(type) ? n.delete(type) : n.add(type); return n })
-
-  const expandNeighbours = async () => {
-    if (!selected || !cyRef.current) return
     setExpanding(true)
     try {
-      const typeMap: Record<string, string> = {
-        paper:  `/api/papers/${selected.id}/citing`,
-        author: `/api/authors/${selected.id}/papers`,
-        topic:  `/api/topics/${selected.id}/papers`,
-      }
-      const url = typeMap[selected.type.toLowerCase()]
-      if (!url) return
-
-      const res = await fetch(url)
-      if (!res.ok) throw new Error(`${res.status}`)
-      const items: Array<{ id: string; title?: string; name?: string }> = await res.json()
-
       const cy = cyRef.current
-      const newEles: (CyNode | CyEdge)[] = []
-      for (const item of items) {
-        if (!cy.getElementById(item.id).length)
-          newEles.push({ data: { id: item.id, label: item.title ?? item.name ?? item.id, type: 'Paper' } })
-        const eid = `${selected.id}--${item.id}`
-        if (!cy.getElementById(eid).length)
-          newEles.push({ data: { id: eid, source: selected.id, target: item.id, label: '' } })
+      const data = overviewRef.current
+      const toAdd: cytoscape.ElementDefinition[] = []
+
+      if (selected.type === 'Paper') {
+        // Add connected Authors and Topics from the pre-loaded overview
+        const connectedEdges = data.edges.filter(
+          e => e.data.source === selected.id || e.data.target === selected.id
+        )
+        for (const edge of connectedEdges) {
+          const neighbourId = edge.data.source === selected.id ? edge.data.target : edge.data.source
+          const neighbourNode = data.nodes.find(n => n.data.id === neighbourId)
+          if (neighbourNode && !cy.getElementById(neighbourId).length)
+            toAdd.push({ data: neighbourNode.data })
+          if (!cy.getElementById(edge.data.id).length)
+            toAdd.push({ data: edge.data })
+        }
+      } else {
+        // For Author/Topic nodes: pull in their papers from the overview edges
+        const connectedEdges = data.edges.filter(
+          e => e.data.source === selected.id || e.data.target === selected.id
+        )
+        for (const edge of connectedEdges) {
+          const neighbourId = edge.data.source === selected.id ? edge.data.target : edge.data.source
+          const neighbourNode = data.nodes.find(n => n.data.id === neighbourId)
+          if (neighbourNode && !cy.getElementById(neighbourId).length)
+            toAdd.push({ data: neighbourNode.data })
+          if (!cy.getElementById(edge.data.id).length)
+            toAdd.push({ data: edge.data })
+        }
       }
-      if (newEles.length) { cy.add(newEles); runLayout(cy, layout) }
-    } finally { setExpanding(false) }
-  }
+
+      if (toAdd.length) {
+        cy.add(toAdd)
+        runLayout(cy, layout)
+      }
+      expandedRef.current.add(selected.id)
+    } finally {
+      setExpanding(false)
+    }
+  }, [selected, layout, runLayout])
+
+  const goToDetail = useCallback(() => {
+    if (!selected) return
+    if (selected.type === 'Author') navigate(`/authors/${selected.id}`)
+    if (selected.type === 'Topic')  navigate(`/topics/${selected.id}`)
+    if (selected.type === 'Paper')  navigate(`/papers?id=${selected.id}`)
+  }, [selected, navigate])
+
+  const isExpanded = selected ? expandedRef.current.has(selected.id) : false
 
   return (
     <div className="flex flex-col h-full">
@@ -172,13 +191,7 @@ export default function GraphExplorer() {
           ))}
         </div>
         <div className="w-px h-5 bg-gray-700" />
-        {NODE_TYPES.map(type => (
-          <button key={type} onClick={() => toggleType(type)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium transition-colors ${hidden.has(type) ? 'bg-gray-800 text-gray-600 line-through' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
-            <span className="w-2 h-2 rounded-full" style={{ background: NODE_COLOURS[type] }} />
-            {type}
-          </button>
-        ))}
+        <span className="text-xs text-gray-500">Click a paper to expand its authors & topics</span>
         <div className="ml-auto">
           <button onClick={() => cyRef.current?.fit(undefined, 40)} title="Fit"
             className="p-1.5 rounded bg-gray-800 text-gray-400 hover:bg-gray-700">
@@ -206,14 +219,26 @@ export default function GraphExplorer() {
                   {selected.type}
                 </span>
                 <p className="text-sm font-medium text-gray-100 leading-snug">{selected.label}</p>
-                <p className="text-xs text-gray-500 mt-0.5 font-mono">{selected.id}</p>
               </div>
               <button onClick={() => setSelected(null)} className="text-gray-600 hover:text-gray-300"><X size={14} /></button>
             </div>
-            <button onClick={expandNeighbours} disabled={expanding}
-              className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-sm text-white transition-colors">
-              {expanding ? <RefreshCw size={13} className="animate-spin" /> : <Share2 size={13} />}
-              Expand neighbours
+
+            {/* Expand neighbours */}
+            {!isExpanded && (
+              <button onClick={expandNode} disabled={expanding}
+                className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-sm text-gray-200 transition-colors">
+                {expanding ? <RefreshCw size={13} className="animate-spin" /> : <ChevronDown size={13} />}
+                Expand neighbours
+              </button>
+            )}
+            {isExpanded && (
+              <p className="text-xs text-gray-600 text-center">Neighbours shown</p>
+            )}
+
+            {/* Open detail view */}
+            <button onClick={goToDetail}
+              className="flex items-center justify-center gap-2 px-3 py-2 rounded bg-indigo-700 hover:bg-indigo-600 text-sm text-white transition-colors">
+              Open detail view →
             </button>
           </div>
         )}

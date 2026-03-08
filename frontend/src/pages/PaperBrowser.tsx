@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import Spinner from '../components/Spinner'
 import ErrorBox from '../components/ErrorBox'
@@ -29,12 +30,14 @@ interface OverviewData {
   nodes: Array<{ data: PaperSummary & { type: string } }>
 }
 
-function Chip({ label, colour }: { label: string; colour: 'green' | 'amber' | 'indigo' }) {
+function Chip({ label, colour, onClick }: { label: string; colour: 'green' | 'amber' | 'indigo'; onClick?: () => void }) {
   const cls = {
     green:  'bg-green-950 text-green-300 border border-green-900',
     amber:  'bg-amber-950 text-amber-300 border border-amber-900',
     indigo: 'bg-indigo-950 text-indigo-300 border border-indigo-900',
   }[colour]
+  if (onClick)
+    return <button onClick={onClick} className={`px-2 py-0.5 rounded text-xs ${cls} hover:brightness-125 transition-all cursor-pointer`}>{label}</button>
   return <span className={`px-2 py-0.5 rounded text-xs ${cls}`}>{label}</span>
 }
 
@@ -50,8 +53,10 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
 }
 
 export default function PaperBrowser() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { data: overview, loading, error } = useApi<OverviewData>('/api/graph/overview')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(searchParams.get('id'))
   const [query, setQuery] = useState('')
 
   const allPapers = overview
@@ -163,14 +168,20 @@ export default function PaperBrowser() {
             {/* Authors */}
             {detail.authors.length > 0 && (
               <Section icon={<User size={12} />} title="Authors">
-                {detail.authors.map(a => <Chip key={a.id} label={a.canonical_name} colour="green" />)}
+                {detail.authors.map(a => (
+                  <Chip key={a.id} label={a.canonical_name} colour="green"
+                    onClick={() => navigate(`/authors/${a.id}`)} />
+                ))}
               </Section>
             )}
 
             {/* Topics */}
             {detail.topics.length > 0 && (
               <Section icon={<Tag size={12} />} title="Topics">
-                {detail.topics.map(t => <Chip key={t.id} label={t.canonical_name} colour="amber" />)}
+                {detail.topics.map(t => (
+                  <Chip key={t.id} label={t.canonical_name} colour="amber"
+                    onClick={() => navigate(`/topics/${t.id}`)} />
+                ))}
               </Section>
             )}
 

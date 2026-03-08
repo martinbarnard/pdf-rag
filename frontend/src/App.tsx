@@ -4,6 +4,8 @@ import { useApi } from './hooks/useApi'
 import GraphExplorer from './pages/GraphExplorer'
 import PaperBrowser from './pages/PaperBrowser'
 import TopicMap from './pages/TopicMap'
+import TopicDetail from './pages/TopicDetail'
+import AuthorDetail from './pages/AuthorDetail'
 import IngestUI from './pages/IngestUI'
 import SearchPage from './pages/Search'
 
@@ -74,11 +76,13 @@ export default function App() {
         <main className="flex-1 overflow-hidden">
           <Routes>
             <Route path="/" element={<Navigate to="/graph" replace />} />
-            <Route path="/graph"  element={<GraphExplorer />} />
-            <Route path="/papers" element={<PaperBrowser />} />
-            <Route path="/topics" element={<TopicMap />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/ingest" element={<IngestUI />} />
+            <Route path="/graph"        element={<GraphExplorer />} />
+            <Route path="/papers"       element={<PaperBrowser />} />
+            <Route path="/topics"       element={<TopicMap />} />
+            <Route path="/topics/:id"   element={<TopicDetail />} />
+            <Route path="/authors/:id"  element={<AuthorDetail />} />
+            <Route path="/search"       element={<SearchPage />} />
+            <Route path="/ingest"       element={<IngestUI />} />
           </Routes>
         </main>
       </div>

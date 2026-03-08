@@ -12,6 +12,34 @@ def _store(request: Request):
     return GraphStore(request.app.state.db_path)
 
 
+@router.get("/authors/{author_id}")
+async def author_detail(author_id: str, request: Request) -> dict:
+    """Name and metadata for a single author."""
+    store = _store(request)
+    r = store.execute(
+        "MATCH (a:Author {id: $id}) RETURN a.id, a.canonical_name",
+        {"id": author_id},
+    )
+    if not r.has_next():
+        raise HTTPException(status_code=404, detail="Author not found")
+    row = r.get_next()
+    return {"id": row[0], "canonical_name": row[1]}
+
+
+@router.get("/topics/{topic_id}")
+async def topic_detail_meta(topic_id: str, request: Request) -> dict:
+    """Name and metadata for a single topic."""
+    store = _store(request)
+    r = store.execute(
+        "MATCH (t:Topic {id: $id}) RETURN t.id, t.canonical_name",
+        {"id": topic_id},
+    )
+    if not r.has_next():
+        raise HTTPException(status_code=404, detail="Topic not found")
+    row = r.get_next()
+    return {"id": row[0], "canonical_name": row[1]}
+
+
 @router.get("/authors/{author_id}/papers")
 async def papers_by_author(author_id: str, request: Request) -> list[dict]:
     """All papers authored by the given author."""
