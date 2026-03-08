@@ -25,7 +25,9 @@ class EntityExtractor:
 
     def _load(self) -> None:
         from gliner import GLiNER
-        self._model = GLiNER.from_pretrained(self.model_name).to(self.device)
+        # Use map_location= (not .to()) to avoid the meta-tensor error that
+        # occurs when weights are initialised on a meta device internally.
+        self._model = GLiNER.from_pretrained(self.model_name, map_location=self.device)
 
     def extract(
         self,
