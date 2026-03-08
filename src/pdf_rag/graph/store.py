@@ -26,6 +26,7 @@ from pdf_rag.graph.schema import create_schema
 # ---------------------------------------------------------------------------
 
 _db_instances: dict[str, kuzu.Database] = {}
+_schema_initialised: set[str] = set()
 _db_lock = threading.Lock()
 
 
@@ -59,6 +60,7 @@ def _release_database(db_path: Path) -> None:
     key = str(db_path.resolve())
     with _db_lock:
         _db_instances.pop(key, None)
+        _schema_initialised.discard(key)
 
 
 class GraphStore:
@@ -71,9 +73,16 @@ class GraphStore:
 
     def __init__(self, db_path: Path | str) -> None:
         db_path = Path(db_path)
+        key = str(db_path.resolve())
         self._db = _get_database(db_path)
         self._conn = kuzu.Connection(self._db)
-        create_schema(self._conn)
+        # Only run schema DDL once per database path per process.
+        # create_schema() issues write transactions; running it concurrently
+        # with other writers causes "Only one write transaction at a time" errors.
+        with _db_lock:
+            if key not in _schema_initialised:
+                create_schema(self._conn)
+                _schema_initialised.add(key)
 
     # ------------------------------------------------------------------
     # Node insertion
