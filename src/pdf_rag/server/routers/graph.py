@@ -152,7 +152,11 @@ async def paper_pdf(paper_id: str, request: Request) -> FileResponse:
     if not path.exists():
         raise HTTPException(status_code=404, detail=f"File not found on disk: {file_path}")
 
-    return FileResponse(str(path), media_type="application/pdf")
+    return FileResponse(
+        str(path),
+        media_type="application/pdf",
+        headers={"Content-Disposition": "inline"},
+    )
 
 
 @router.get("/graph/overview")
