@@ -201,6 +201,61 @@ frontend/                  React + Vite source
 
 ---
 
+## Maintenance
+
+### Bulk re-ingestion
+
+Re-ingest all documents (e.g. after database corruption or a fresh start). The server must be stopped first — kuzu allows only one writer per process.
+
+```bash
+# Stop the server, then:
+uv run pdf-rag ingest ~/.pdf_rag/documents/
+```
+
+Models are loaded once and reused across all files.
+
+### Fix paper titles
+
+If titles show garbled text (e.g. LLM reasoning artefacts like `"Thinking Process:"`), repair them with the server stopped:
+
+```bash
+uv run python scripts/fix_titles.py
+```
+
+The script re-parses each stored file and updates titles using this priority:
+1. docling `TITLE` label (works for most PDFs)
+2. First section heading
+3. Filename stem (last resort)
+
+> **Note:** Do not use the local `qwen3.5-9b` chat model for title generation — it is a reasoning model that narrates its chain-of-thought and produces unusable output for short completions. Titles are extracted directly from document structure instead.
+
+### Remove duplicate files
+
+The ingest endpoint appends `_1`, `_2`, etc. when a file is uploaded more than once. To clean up:
+
+```bash
+# Preview duplicates
+ls ~/.pdf_rag/documents/*_1.pdf
+
+# Remove them
+rm ~/.pdf_rag/documents/*_1.pdf
+```
+
+Then re-ingest if needed (the originals without `_1` are still present).
+
+### Stale WAL recovery
+
+If the server crashes mid-write, kuzu leaves a `.wal` file that can prevent startup with `IndexError: unordered_map::at`. The server auto-recovers on next start by removing the stale WAL, but data written since the last checkpoint will be lost.
+
+To recover manually:
+
+```bash
+rm ~/.pdf_rag/graph.db.wal
+uv run pdf-rag ingest ~/.pdf_rag/documents/   # re-ingest lost documents
+```
+
+---
+
 ## Acknowledgements
 
 Uses the [arXiv](https://arxiv.org) API for related paper search (planned). Thank you to arXiv for use of its open access interoperability.
