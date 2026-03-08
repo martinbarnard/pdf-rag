@@ -36,6 +36,8 @@ function makeStylesheet(hidden: Set<string>): cytoscape.StylesheetJson {
         color: '#e5e7eb',
         'text-valign': 'bottom',
         'text-margin-y': 4,
+        'text-max-width': '80px',
+        'text-wrap': 'ellipsis',
         width: 28,
         height: 28,
         'background-color': '#6b7280',

@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 # Path where the built React frontend will live
@@ -60,9 +60,17 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app.include_router(search.router, prefix="/api")
     app.include_router(ingest.router, prefix="/api")
 
-    # Serve built frontend — create dir if missing so mount doesn't fail
+    # Serve built frontend assets (JS/CSS/images)
     _STATIC_DIR.mkdir(parents=True, exist_ok=True)
-    app.mount("/app", StaticFiles(directory=str(_STATIC_DIR), html=True), name="static")
+    app.mount("/app/assets", StaticFiles(directory=str(_STATIC_DIR / "assets")), name="assets")
+
+    # Catch-all: any /app/* path that isn't a real asset returns index.html
+    # so React Router handles client-side navigation on hard refresh.
+    _index = _STATIC_DIR / "index.html"
+
+    @app.get("/app/{full_path:path}", include_in_schema=False)
+    async def spa_fallback(full_path: str) -> FileResponse:
+        return FileResponse(str(_index))
 
     return app
 
