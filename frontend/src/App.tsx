@@ -83,7 +83,7 @@ export default function App() {
       <IngestProvider>
       <div className="flex h-screen bg-gray-950 text-gray-100 overflow-hidden">
         <Sidebar />
-        <main className="flex-1 overflow-hidden">
+        <main className="flex flex-col flex-1 overflow-hidden">
           <Routes>
             <Route path="/" element={<Navigate to="/graph" replace />} />
             <Route path="/graph"        element={<GraphExplorer />} />
