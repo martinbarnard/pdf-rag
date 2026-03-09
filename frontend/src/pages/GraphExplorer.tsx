@@ -705,6 +705,10 @@ export default function GraphExplorer() {
         <div ref={containerRef} className="flex-1 bg-gray-950" />
 
         {/* ── Node detail panel ───────────────────────────────────────── */}
+        {/* DEBUG always-visible panel */}
+        <div style={{width:'18rem', flexShrink:0, background:'#7f1d1d', color:'white', padding:'1rem', zIndex:50}}>
+          DEBUG PANEL — selected: {selected ? selected.type + ' / ' + selected.label : 'null'}
+        </div>
         {selected && (
           <div className="w-72 shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col overflow-hidden">
             {/* Header */}
