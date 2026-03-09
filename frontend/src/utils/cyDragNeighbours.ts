@@ -92,13 +92,16 @@ function buildGraph(
 export function attachDragNeighbours(cy: Core): () => void {
   let sim: Simulation<SimNode, SimLink> | null = null
   let nodeMap: Map<string, SimNode>            = new Map()
+  let pendingGraph: { nodes: SimNode[]; links: SimLink[] } | null = null
   let rafId: number | null = null
   let settleTimer: ReturnType<typeof setTimeout> | null = null
+  let didDrag = false  // true only when the node actually moved after grab
 
   function cancelAll() {
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
     if (sim) { sim.stop(); sim = null }
     nodeMap = new Map()
+    pendingGraph = null
   }
 
   /** Write simulation node positions back into Cytoscape each tick. */
@@ -116,33 +119,46 @@ export function attachDragNeighbours(cy: Core): () => void {
   function onGrab(evt: cytoscape.EventObject) {
     cancelAll()
     if (settleTimer) { clearTimeout(settleTimer); settleTimer = null }
+    didDrag = false
     cy.nodes().unlock()
 
     const root = evt.target as NodeSingular
     const { nodes, links, nodeMap: nm } = buildGraph(root, MAX_DEPTH)
     nodeMap = nm
 
-    if (nodes.length < 2) return  // isolated node — nothing to simulate
-
-    sim = forceSimulation<SimNode, SimLink>(nodes)
-      .force('link', forceLink<SimNode, SimLink>(links)
-        .id(d => d.id)
-        .distance(LINK_DISTANCE)
-        .strength(LINK_STRENGTH)
-      )
-      .force('charge', forceManyBody<SimNode>().strength(CHARGE))
-      // Weak centering forces on free nodes prevent them flying off to infinity
-      .force('x', forceX<SimNode>(d => (d as SimNode).fixed ? (d.x ?? 0) : (d.x ?? 0)).strength(0.05))
-      .force('y', forceY<SimNode>(d => (d as SimNode).fixed ? (d.y ?? 0) : (d.y ?? 0)).strength(0.05))
-      .velocityDecay(VELOCITY_DECAY)
-      .alphaDecay(ALPHA_DECAY)  // don't cool while dragging
-      .alpha(0.5)
-      .on('tick', () => {
-        if (rafId === null) rafId = requestAnimationFrame(syncToCy)
-      })
+    if (nodes.length >= 2) {
+      // Store the graph data but don't start the simulation yet.
+      // The sim will be created lazily on the first drag event so that
+      // a plain click never triggers neighbour movement.
+      pendingGraph = { nodes, links }
+    }
   }
 
   function onDrag(evt: cytoscape.EventObject) {
+    didDrag = true
+
+    // Lazily start the simulation on the first real drag event
+    if (!sim && pendingGraph) {
+      const { nodes, links } = pendingGraph
+      pendingGraph = null
+      sim = forceSimulation<SimNode, SimLink>(nodes)
+        .force('link', forceLink<SimNode, SimLink>(links)
+          .id(d => d.id)
+          .distance(LINK_DISTANCE)
+          .strength(LINK_STRENGTH)
+        )
+        .force('charge', forceManyBody<SimNode>().strength(CHARGE))
+        // Weak centering forces on free nodes prevent them flying off to infinity
+        .force('x', forceX<SimNode>(d => (d as SimNode).fixed ? (d.x ?? 0) : (d.x ?? 0)).strength(0.05))
+        .force('y', forceY<SimNode>(d => (d as SimNode).fixed ? (d.y ?? 0) : (d.y ?? 0)).strength(0.05))
+        .velocityDecay(VELOCITY_DECAY)
+        .alphaDecay(ALPHA_DECAY)
+        .alpha(0.5)
+        .on('tick', () => {
+          if (rafId === null) rafId = requestAnimationFrame(syncToCy)
+        })
+    }
+
     if (!sim || !nodeMap.size) return
     const cur  = (evt.target as NodeSingular).position()
     const root = nodeMap.get((evt.target as NodeSingular).id())
@@ -160,6 +176,7 @@ export function attachDragNeighbours(cy: Core): () => void {
 
   function onFree(evt: cytoscape.EventObject) {
     cancelAll()
+    if (!didDrag) return  // plain click — don't touch any node positions
     const droppedNode = evt.target as NodeSingular
 
     // After a short pause, run a local sub-layout on the dropped node and its
