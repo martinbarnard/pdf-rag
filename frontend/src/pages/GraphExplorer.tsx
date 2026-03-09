@@ -706,7 +706,7 @@ export default function GraphExplorer() {
 
         {/* ── Node detail panel ───────────────────────────────────────── */}
         {selected && (
-          <div style={{width:'18rem', flexShrink:0, display:'flex', flexDirection:'column', background:'#111827', borderLeft:'1px solid #1f2937', overflow:'hidden'}}>
+          <div style={{position:'fixed', top:0, right:0, bottom:0, width:'18rem', background:'#111827', borderLeft:'1px solid #1f2937', overflow:'auto', zIndex:100, display:'flex', flexDirection:'column'}}>
             {/* Header */}
             <div className="px-4 py-3 border-b border-gray-800 shrink-0 flex items-start justify-between gap-2">
               <div className="min-w-0">
