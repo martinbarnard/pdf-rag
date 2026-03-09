@@ -103,6 +103,59 @@ const LAYOUTS: { key: Layout; label: string }[] = [
 
 // Ghost node IDs must not contain colons — cytoscape uses IDs as CSS selectors
 // internally and colons are invalid there.
+
+/**
+ * After new nodes are added, zoom out just enough so they are all visible.
+ * Never zooms in — if all new nodes are already inside the viewport, does nothing.
+ */
+function zoomToIncludeIfNeeded(cy: Core, newNodes: cytoscape.NodeCollection): void {
+  if (!newNodes.length) return
+
+  const PAD = 40  // px padding around the expanded viewport
+
+  // Current viewport extent in graph coordinates
+  const ext  = cy.extent()       // { x1, y1, x2, y2 } in model coords
+  const zoom = cy.zoom()
+  const pan  = cy.pan()          // { x, y } in screen coords
+
+  // Bounding box of new nodes in graph coords
+  const bb   = newNodes.boundingBox({})   // { x1, y1, x2, y2, w, h }
+
+  // Check if all new nodes are already fully inside the viewport
+  if (bb.x1 >= ext.x1 && bb.x2 <= ext.x2 && bb.y1 >= ext.y1 && bb.y2 <= ext.y2) return
+
+  // Expand the target extent to cover both the current viewport AND the new nodes
+  const targetX1 = Math.min(ext.x1, bb.x1)
+  const targetY1 = Math.min(ext.y1, bb.y1)
+  const targetX2 = Math.max(ext.x2, bb.x2)
+  const targetY2 = Math.max(ext.y2, bb.y2)
+
+  const containerW = cy.width()
+  const containerH = cy.height()
+
+  // Zoom required to fit the expanded extent with padding
+  const newZoom = Math.min(
+    (containerW - PAD * 2) / (targetX2 - targetX1),
+    (containerH - PAD * 2) / (targetY2 - targetY1),
+  )
+
+  // Only zoom out — if the required zoom is >= current zoom, no change needed
+  if (newZoom >= zoom) return
+
+  // New pan to center the expanded extent
+  const cx = (targetX1 + targetX2) / 2
+  const cy2 = (targetY1 + targetY2) / 2
+  const newPan = {
+    x: containerW / 2 - cx * newZoom,
+    y: containerH / 2 - cy2 * newZoom,
+  }
+
+  cy.animate({ zoom: newZoom, pan: newPan }, { duration: 300, easing: 'ease-out' })
+
+  // Suppress unused-variable lint — pan is read for correctness check above
+  void pan
+}
+
 const ghostPaperId  = (arxiv_id: string) => `arxiv__${arxiv_id}`
 const ghostAuthorId = (name: string)     => `ghost_author__${name.replace(/\s+/g, '_')}`
 const ghostTopicId  = (cat: string)      => `ghost_topic__${cat}`
@@ -218,6 +271,10 @@ export default function GraphExplorer() {
       return
     }
 
+    // Capture the new node collection before locking (used for viewport check after settle)
+    const newNodes = cy.collection()
+    newNodeIds.forEach(id => { const n = cy.getElementById(id); if (n.length) newNodes.merge(n) })
+
     cy.nodes().not(affected).lock()
     try {
       affected.layout({
@@ -240,7 +297,11 @@ export default function GraphExplorer() {
         } : {}),
       } as cytoscape.LayoutOptions).run()
     } finally {
-      setTimeout(() => cy.nodes().unlock(), 500)
+      setTimeout(() => {
+        cy.nodes().unlock()
+        // Zoom out only if any new node is outside the current viewport
+        zoomToIncludeIfNeeded(cy, newNodes)
+      }, 500)
     }
   }, [runLayout])
 
