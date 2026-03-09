@@ -658,7 +658,7 @@ export default function GraphExplorer() {
   const isGhost    = selected?.type?.startsWith('Ghost') ?? false
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Toolbar */}
       <div className="flex items-center gap-3 px-4 py-2 bg-gray-900 border-b border-gray-800 shrink-0">
         <div className="flex gap-1">
@@ -671,10 +671,6 @@ export default function GraphExplorer() {
         </div>
         <div className="w-px h-5 bg-gray-700" />
         <span className="text-xs text-gray-500">Click node for details · Right-click to search arXiv</span>
-        {/* DEBUG: remove after confirming panel works */}
-        <span className="text-xs font-mono px-2 py-0.5 rounded bg-gray-800 text-yellow-400">
-          {selected ? `✓ ${selected.type}: ${selected.label.slice(0,20)}` : '— no selection —'}
-        </span>
 
         <div className="ml-auto flex items-center gap-2">
           <form onSubmit={e => {
@@ -699,7 +695,7 @@ export default function GraphExplorer() {
       </div>
 
       {/* Canvas + panels */}
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="flex flex-1 min-h-0 overflow-hidden relative">
         {loading && (
           <div className="absolute inset-0 z-10 bg-gray-950/80 flex items-center justify-center">
             <Spinner label="Loading graph…" />
