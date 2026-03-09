@@ -1,150 +1,182 @@
 /**
- * Drag behaviour for Cytoscape:
+ * Drag behaviour for Cytoscape using d3-force velocity Verlet integration:
  *
- * During drag  — connected nodes are pulled by dampened springs.
- *               Each neighbour has a velocity that is attracted toward
- *               its target position (dragged node offset × hop factor)
- *               and damped each tick so it converges without oscillating.
- * After drag   — run a local fcose sub-layout on the dragged node + its
+ * During drag  — a live d3-force simulation runs on the grabbed node's
+ *               neighbourhood.  The dragged node is treated as a fixed
+ *               "anchor" whose position is updated each drag event; link
+ *               forces pull neighbours toward it with spring tension;
+ *               charge forces keep them from colliding; velocity decay
+ *               damps oscillation.  The Verlet integrator is stable even
+ *               at large time-steps.
+ *
+ * After drag   — run a local fcose sub-layout on the dropped node + its
  *               immediate neighbourhood so they settle without overlapping,
  *               while the rest of the graph stays put.
  */
 import type { Core, NodeSingular } from 'cytoscape'
+import {
+  forceSimulation,
+  forceLink,
+  forceManyBody,
+  forceX,
+  forceY,
+  type Simulation,
+  type SimulationNodeDatum,
+  type SimulationLinkDatum,
+} from 'd3-force'
 
-// Spring constants
-const SPRING_K   = 0.18   // attraction strength toward target per tick (0–1)
-const DAMPING    = 0.75   // velocity multiplier each tick (< 1 = damped)
-const HOP_FACTOR = 0.7    // target-offset fraction per hop (1-hop gets 70%, 2-hop 49%)
-const MAX_DEPTH  = 2      // hops to include in spring system
+// Simulation parameters
+const LINK_DISTANCE  = 0   // desired link length (0 = use current distance at grab time)
+const LINK_STRENGTH  = 0.3 // spring stiffness (0–1)
+const CHARGE         = -80 // charge repulsion between neighbours
+const VELOCITY_DECAY = 0.4 // fraction of velocity retained each tick (lower = more damping)
+const ALPHA_DECAY    = 0   // don't cool down while dragging — reheat on each drag event
+const MAX_DEPTH      = 2   // hops to include in the simulation
 
-type SpringState = {
-  /** Target position this frame (updated each drag event) */
-  targetX: number
-  targetY: number
-  /** Accumulated velocity */
-  vx: number
-  vy: number
-  /** Fraction of dragged-node offset applied to this neighbour's target */
-  factor: number
-  /** Snap position at grab time */
-  originX: number
-  originY: number
+interface SimNode extends SimulationNodeDatum {
+  id: string
+  fixed: boolean   // true for the dragged node — its position is set by the drag event
 }
 
-function buildSpringMap(root: NodeSingular, maxDepth: number, hopFactor: number): Map<string, SpringState> {
-  const map = new Map<string, SpringState>()
-  const visited = new Set<string>([root.id()])
+interface SimLink extends SimulationLinkDatum<SimNode> {
+  source: SimNode
+  target: SimNode
+}
+
+function buildGraph(
+  root: NodeSingular,
+  maxDepth: number,
+): { nodes: SimNode[]; links: SimLink[]; nodeMap: Map<string, SimNode> } {
+  const nodeMap   = new Map<string, SimNode>()
+  const links: SimLink[] = []
+  const visited   = new Set<string>([root.id()])
+
+  // Root node is fixed (dragged) — its position is driven by the mouse
+  const rootPos   = root.position()
+  const rootNode: SimNode = { id: root.id(), x: rootPos.x, y: rootPos.y, fixed: true, fx: rootPos.x, fy: rootPos.y }
+  nodeMap.set(root.id(), rootNode)
+
   let frontier: NodeSingular[] = [root]
-  let factor = hopFactor
 
   for (let depth = 1; depth <= maxDepth; depth++) {
     const next: NodeSingular[] = []
-    for (const node of frontier) {
-      node.neighborhood('node').forEach((n: NodeSingular) => {
-        if (!visited.has(n.id())) {
-          visited.add(n.id())
-          const pos = n.position()
-          map.set(n.id(), {
-            targetX: pos.x, targetY: pos.y,
-            vx: 0, vy: 0,
-            factor,
-            originX: pos.x, originY: pos.y,
-          })
-          next.push(n)
+    for (const cyNode of frontier) {
+      const simSrc = nodeMap.get(cyNode.id())!
+      cyNode.neighborhood('node').forEach((nb: NodeSingular) => {
+        if (!visited.has(nb.id())) {
+          visited.add(nb.id())
+          const pos = nb.position()
+          const simNb: SimNode = { id: nb.id(), x: pos.x, y: pos.y, fixed: false }
+          nodeMap.set(nb.id(), simNb)
+          next.push(nb)
+        }
+        // Add link if both endpoints are in our set
+        const simNb = nodeMap.get(nb.id())
+        if (simNb) {
+          // Avoid duplicate links
+          const already = links.some(l =>
+            (l.source.id === simSrc.id && l.target.id === simNb.id) ||
+            (l.source.id === simNb.id && l.target.id === simSrc.id)
+          )
+          if (!already) links.push({ source: simSrc, target: simNb })
         }
       })
     }
     frontier = next
-    factor *= hopFactor
     if (!frontier.length) break
   }
-  return map
+
+  return { nodes: Array.from(nodeMap.values()), links, nodeMap }
 }
 
 export function attachDragNeighbours(cy: Core): () => void {
-  let springs: Map<string, SpringState> = new Map()
-  let grabPos: { x: number; y: number } | null = null
+  let sim: Simulation<SimNode, SimLink> | null = null
+  let nodeMap: Map<string, SimNode>            = new Map()
   let rafId: number | null = null
   let settleTimer: ReturnType<typeof setTimeout> | null = null
 
-  function cancelRaf() {
+  function cancelAll() {
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null }
+    if (sim) { sim.stop(); sim = null }
+    nodeMap = new Map()
   }
 
-  /** rAF loop: step each spring toward its current target */
-  function tick() {
-    rafId = null
-    if (!springs.size) return
-
-    let anyActive = false
-    springs.forEach((s, id) => {
+  /** Write simulation node positions back into Cytoscape each tick. */
+  function syncToCy() {
+    nodeMap.forEach((sn, id) => {
+      if (sn.fixed) return  // dragged node is positioned by the drag event directly
       const n = cy.getElementById(id)
-      if (!n.length || n.grabbed() || n.locked()) return
-
-      const cur = n.position()
-      const fx = (s.targetX - cur.x) * SPRING_K
-      const fy = (s.targetY - cur.y) * SPRING_K
-      s.vx = (s.vx + fx) * DAMPING
-      s.vy = (s.vy + fy) * DAMPING
-
-      if (Math.abs(s.vx) > 0.01 || Math.abs(s.vy) > 0.01) {
-        n.position({ x: cur.x + s.vx, y: cur.y + s.vy })
-        anyActive = true
+      if (n.length && !n.grabbed() && !n.locked()) {
+        n.position({ x: sn.x ?? 0, y: sn.y ?? 0 })
       }
     })
-
-    if (anyActive) {
-      rafId = requestAnimationFrame(tick)
-    }
+    rafId = null
   }
 
   function onGrab(evt: cytoscape.EventObject) {
-    cancelRaf()
+    cancelAll()
     if (settleTimer) { clearTimeout(settleTimer); settleTimer = null }
-    // Unlock everything — a previous settle may have left nodes locked
     cy.nodes().unlock()
-    const node = evt.target as NodeSingular
-    grabPos = { ...node.position() }
-    springs = buildSpringMap(node, MAX_DEPTH, HOP_FACTOR)
-    rafId = requestAnimationFrame(tick)
+
+    const root = evt.target as NodeSingular
+    const { nodes, links, nodeMap: nm } = buildGraph(root, MAX_DEPTH)
+    nodeMap = nm
+
+    if (nodes.length < 2) return  // isolated node — nothing to simulate
+
+    sim = forceSimulation<SimNode, SimLink>(nodes)
+      .force('link', forceLink<SimNode, SimLink>(links)
+        .id(d => d.id)
+        .distance(LINK_DISTANCE)
+        .strength(LINK_STRENGTH)
+      )
+      .force('charge', forceManyBody<SimNode>().strength(CHARGE))
+      // Weak centering forces on free nodes prevent them flying off to infinity
+      .force('x', forceX<SimNode>(d => (d as SimNode).fixed ? (d.x ?? 0) : (d.x ?? 0)).strength(0.05))
+      .force('y', forceY<SimNode>(d => (d as SimNode).fixed ? (d.y ?? 0) : (d.y ?? 0)).strength(0.05))
+      .velocityDecay(VELOCITY_DECAY)
+      .alphaDecay(ALPHA_DECAY)  // don't cool while dragging
+      .alpha(0.5)
+      .on('tick', () => {
+        if (rafId === null) rafId = requestAnimationFrame(syncToCy)
+      })
   }
 
   function onDrag(evt: cytoscape.EventObject) {
-    if (!grabPos || !springs.size) return
-    const cur = (evt.target as NodeSingular).position()
-    const dx = cur.x - grabPos.x
-    const dy = cur.y - grabPos.y
-    // Update each spring's target — the tick loop converges toward it
-    springs.forEach((s) => {
-      s.targetX = s.originX + dx * s.factor
-      s.targetY = s.originY + dy * s.factor
-    })
-    // Ensure tick loop is running
-    if (rafId === null) rafId = requestAnimationFrame(tick)
+    if (!sim || !nodeMap.size) return
+    const cur  = (evt.target as NodeSingular).position()
+    const root = nodeMap.get((evt.target as NodeSingular).id())
+    if (!root) return
+
+    // Move the anchor — the sim's link forces will pull neighbours toward it
+    root.fx = cur.x
+    root.fy = cur.y
+    root.x  = cur.x
+    root.y  = cur.y
+
+    // Reheat so neighbours respond vigorously even on slow drags
+    sim.alpha(Math.max(sim.alpha(), 0.3)).restart()
   }
 
   function onFree(evt: cytoscape.EventObject) {
-    cancelRaf()
+    cancelAll()
     const droppedNode = evt.target as NodeSingular
-    springs = new Map()
-    grabPos = null
 
     // After a short pause, run a local sub-layout on the dropped node and its
     // 1-hop neighbourhood so they settle and stop overlapping.
     settleTimer = setTimeout(() => {
       settleTimer = null
-      const hood = droppedNode.closedNeighborhood()  // node + its edges + neighbours
+      const hood     = droppedNode.closedNeighborhood()
       const subNodes = hood.nodes()
       if (subNodes.length < 2) return
 
-      // Lock all nodes OUTSIDE the neighbourhood so they don't move
       cy.nodes().not(subNodes).lock()
       try {
         subNodes.layout({
           name: 'fcose',
           animate: true,
           animationDuration: 350,
-          fit: false,        // never auto-zoom — user controls viewport
+          fit: false,
           quality: 'proof',
           randomize: false,
           nodeDimensionsIncludeLabels: true,
@@ -153,13 +185,11 @@ export function attachDragNeighbours(cy: Core): () => void {
           edgeElasticity: 0.35,
           gravity: 0.1,
           numIter: 2500,
-          // Keep the dragged node as an anchor so the sub-graph doesn't drift
           fixedNodeConstraint: [
             { nodeId: droppedNode.id(), position: droppedNode.position() },
           ],
         } as cytoscape.LayoutOptions).run()
       } finally {
-        // Unlock after animation completes
         setTimeout(() => cy.nodes().unlock(), 400)
       }
     }, 150)
@@ -170,7 +200,7 @@ export function attachDragNeighbours(cy: Core): () => void {
   cy.on('free', 'node', onFree)
 
   return () => {
-    cancelRaf()
+    cancelAll()
     if (settleTimer) clearTimeout(settleTimer)
     cy.off('grab', 'node', onGrab)
     cy.off('drag', 'node', onDrag)
