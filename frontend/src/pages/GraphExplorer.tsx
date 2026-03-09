@@ -671,6 +671,10 @@ export default function GraphExplorer() {
         </div>
         <div className="w-px h-5 bg-gray-700" />
         <span className="text-xs text-gray-500">Click node for details · Right-click to search arXiv</span>
+        {/* DEBUG: remove after confirming panel works */}
+        <span className="text-xs font-mono px-2 py-0.5 rounded bg-gray-800 text-yellow-400">
+          {selected ? `✓ ${selected.type}: ${selected.label.slice(0,20)}` : '— no selection —'}
+        </span>
 
         <div className="ml-auto flex items-center gap-2">
           <form onSubmit={e => {
