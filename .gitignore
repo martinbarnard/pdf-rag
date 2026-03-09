@@ -1,6 +1,8 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 feature_docs/
+uv.lock
+poetry.lock
 *.py[cod]
 *$py.class
 
