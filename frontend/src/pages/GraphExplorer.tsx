@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, Component } from 'react'
+import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import cytoscape from 'cytoscape'
 import type { Core, NodeSingular } from 'cytoscape'
@@ -10,6 +11,44 @@ import { attachDragNeighbours } from '../utils/cyDragNeighbours'
 import { GRAPH_STYLESHEET } from '../utils/cyStylesheet'
 
 cytoscape.use(fcose)
+
+// Error boundary to surface render errors that React swallows in production
+class PanelErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  state = { error: null }
+  static getDerivedStateFromError(e: Error) { return { error: e.message } }
+  render() {
+    if (this.state.error) return (
+      <div className="p-3 text-xs text-red-400 bg-red-950/30 rounded m-2">
+        Panel error: {this.state.error}
+      </div>
+    )
+    return this.props.children
+  }
+}
+
+// Defined outside component so React sees a stable type on every render
+function IngestBtn({
+  arxiv_id,
+  state,
+  onIngest,
+}: {
+  arxiv_id: string
+  state: 'idle' | 'ingesting' | 'done' | 'error'
+  onIngest: (id: string) => void
+}) {
+  if (state === 'done')  return <span className="text-xs text-green-400">Ingested ✓</span>
+  if (state === 'error') return <span className="text-xs text-red-400">Ingest failed</span>
+  return (
+    <button
+      onClick={() => onIngest(arxiv_id)}
+      disabled={state === 'ingesting'}
+      className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-xs text-white transition-colors">
+      {state === 'ingesting'
+        ? <><RefreshCw size={11} className="animate-spin" /> Ingesting…</>
+        : <><Download size={11} /> Ingest</>}
+    </button>
+  )
+}
 
 const NODE_COLOURS: Record<string, string> = {
   Paper:  '#6366f1',
@@ -76,6 +115,9 @@ export default function GraphExplorer() {
   const layoutRef    = useRef<Layout>('fcose')
   // Map ghostPaperId → ArxivResult for the detail panel
   const ghostResultsRef = useRef<Map<string, ArxivResult>>(new Map())
+  // Stable refs for callbacks used inside the cytoscape effect — avoids re-mounting the graph
+  const fetchNodeDetailRef  = useRef<(id: string, type: string) => void>(() => {})
+  const searchPanelArxivRef = useRef<(terms: string[], author?: string) => void>(() => {})
 
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState<string | null>(null)
@@ -313,6 +355,7 @@ export default function GraphExplorer() {
       setDetailLoading(false)
     }
   }, [])
+  useEffect(() => { fetchNodeDetailRef.current = fetchNodeDetail }, [fetchNodeDetail])
 
   /** arXiv search shown inline in the node detail panel (ghost author/topic tap). */
   const searchPanelArxiv = useCallback(async (terms: string[], author = '') => {
@@ -332,6 +375,7 @@ export default function GraphExplorer() {
       setPanelArxivSearching(false)
     }
   }, [addGhostResults])
+  useEffect(() => { searchPanelArxivRef.current = searchPanelArxiv }, [searchPanelArxiv])
 
   const ingestGhost = useCallback(async (arxiv_id: string) => {
     setIngestState(s => ({ ...s, [arxiv_id]: 'ingesting' }))
@@ -411,6 +455,7 @@ export default function GraphExplorer() {
           const id    = node.id()
           const type  = node.data('type') as string
           const label = node.data('label') as string
+          console.debug('[GraphExplorer] tap node', { id, type, label })
           setSelected({ id, type, label })
           setNodeDetail(null)
           setGhostDetail(null)
@@ -445,19 +490,17 @@ export default function GraphExplorer() {
           }
 
           if (type === 'GhostAuthor') {
-            // Strip ghost prefix to get real name, search arXiv inline
-            const name = label
-            searchPanelArxiv([], name)
+            searchPanelArxivRef.current([], label)
             return
           }
 
           if (type === 'GhostTopic') {
-            searchPanelArxiv([label])
+            searchPanelArxivRef.current([label])
             return
           }
 
           // Real node — fetch detail and auto-expand
-          fetchNodeDetail(id, type)
+          fetchNodeDetailRef.current(id, type)
 
           if (!expandedRef.current.has(id)) {
             const toAdd: cytoscape.ElementDefinition[] = []
@@ -477,6 +520,7 @@ export default function GraphExplorer() {
 
         cy.on('tap', (evt) => {
           if (evt.target === cy) {
+            console.debug('[GraphExplorer] tap background — clearing selection')
             setSelected(null)
             setGhostDetail(null)
             setNodeDetail(null)
@@ -510,7 +554,7 @@ export default function GraphExplorer() {
       .catch(e => { setError(String(e)); setLoading(false) })
 
     return () => { cyRef.current?.destroy(); cyRef.current = null }
-  }, [runLayout, addAndSettle, searchArxiv, searchRelatedArxiv, fetchNodeDetail, searchPanelArxiv])
+  }, [runLayout, addAndSettle, searchArxiv, searchRelatedArxiv])
 
   useEffect(() => {
     if (cyRef.current) runLayout(cyRef.current, layout)
@@ -551,23 +595,6 @@ export default function GraphExplorer() {
 
   const isExpanded = selected ? expandedRef.current.has(selected.id) : false
   const isGhost    = selected?.type?.startsWith('Ghost') ?? false
-
-  // ── Ingest button shared renderer ───────────────────────────────────────────
-  const IngestBtn = ({ arxiv_id }: { arxiv_id: string }) => {
-    const state = ingestState[arxiv_id] ?? 'idle'
-    if (state === 'done')  return <span className="text-xs text-green-400">Ingested ✓</span>
-    if (state === 'error') return <span className="text-xs text-red-400">Ingest failed</span>
-    return (
-      <button
-        onClick={() => ingestGhost(arxiv_id)}
-        disabled={state === 'ingesting'}
-        className="flex items-center gap-1 px-2.5 py-1.5 rounded bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-xs text-white transition-colors">
-        {state === 'ingesting'
-          ? <><RefreshCw size={11} className="animate-spin" /> Ingesting…</>
-          : <><Download size={11} /> Ingest</>}
-      </button>
-    )
-  }
 
   return (
     <div className="flex flex-col h-full">
@@ -632,6 +659,7 @@ export default function GraphExplorer() {
                 className="text-gray-600 hover:text-gray-300 shrink-0 mt-0.5"><X size={14} /></button>
             </div>
 
+            <PanelErrorBoundary>
             <div className="flex-1 overflow-y-auto px-4 py-3 flex flex-col gap-3">
 
               {/* ── Ghost Paper ── */}
@@ -667,7 +695,7 @@ export default function GraphExplorer() {
                       <p className="text-xs text-gray-500">{d.published.slice(0, 4)}</p>
                     )}
                     <div className="flex flex-col gap-2 pt-1">
-                      <IngestBtn arxiv_id={d.arxiv_id} />
+                      <IngestBtn arxiv_id={d.arxiv_id} state={ingestState[d.arxiv_id] ?? 'idle'} onIngest={ingestGhost} />
                       {arxivUrl && (
                         <a href={arxivUrl} target="_blank" rel="noreferrer"
                           className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
@@ -690,7 +718,7 @@ export default function GraphExplorer() {
                       <p className="text-xs text-gray-500">{r.published.slice(0, 4)} · {r.categories.slice(0, 2).join(', ')}</p>
                       <p className="text-xs text-gray-400 line-clamp-2">{r.abstract}</p>
                       <div className="flex items-center gap-2 pt-0.5">
-                        <IngestBtn arxiv_id={r.arxiv_id} />
+                        <IngestBtn arxiv_id={r.arxiv_id} state={ingestState[r.arxiv_id] ?? 'idle'} onIngest={ingestGhost} />
                         <a href={`https://arxiv.org/abs/${r.arxiv_id}`} target="_blank" rel="noreferrer"
                           className="flex items-center gap-0.5 text-xs text-indigo-400 hover:text-indigo-300">
                           <ExternalLink size={10} /> arXiv
@@ -717,7 +745,7 @@ export default function GraphExplorer() {
                       </p>
                       <p className="text-xs text-gray-400 line-clamp-2">{r.abstract}</p>
                       <div className="flex items-center gap-2 pt-0.5">
-                        <IngestBtn arxiv_id={r.arxiv_id} />
+                        <IngestBtn arxiv_id={r.arxiv_id} state={ingestState[r.arxiv_id] ?? 'idle'} onIngest={ingestGhost} />
                         <a href={`https://arxiv.org/abs/${r.arxiv_id}`} target="_blank" rel="noreferrer"
                           className="flex items-center gap-0.5 text-xs text-indigo-400 hover:text-indigo-300">
                           <ExternalLink size={10} /> arXiv
@@ -924,6 +952,7 @@ export default function GraphExplorer() {
               )}
 
             </div>
+            </PanelErrorBoundary>
           </div>
         )}
 
